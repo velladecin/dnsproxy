@@ -36,8 +36,8 @@ type DnsProxy struct {
     Packet <-chan []byte
 
     // user defined handlers
-    requestHandler func(*Request)
-    responseHandler func(*Response)
+    queryHandler func(*Query)
+    answerHandler func(*Query, *Answer)
 }
 
 func NewDnsProxy(remote ...string) (*DnsProxy, error) {
@@ -59,36 +59,36 @@ func NewDnsProxy(remote ...string) (*DnsProxy, error) {
     return &dx, nil
 }
 
-// RequestHandler is defined by user
-// handleRequest is run by proxy request receiver
-func (dx *DnsProxy) RequestHandler(fn func(*Request)) { dx.requestHandler = fn }
-func (dx *DnsProxy) handleRequest(r *Request) {
-    if dx.requestHandler == nil {
+// QueryHandler is defined by user
+// handleQuery is run by proxy query receiver
+func (dx *DnsProxy) QueryHandler(fn func(*Query)) { dx.queryHandler = fn }
+func (dx *DnsProxy) handleQuery(r *Query) {
+    if dx.queryHandler == nil {
         return
     }
 
-    dx.requestHandler(r)
+    dx.queryHandler(r)
 }
 
-// ResponseHandler is defined by user
-// handleResponse is run by proxy response receiver
-func (dx *DnsProxy) ResponseHandler(fn func(*Response)) { dx.responseHandler = fn }
-func (dx *DnsProxy) handleResponse(r *Response) {
-    if dx.responseHandler == nil {
+// AnswerHandler is defined by user
+// handleAnswer is run by proxy answer receiver
+func (dx *DnsProxy) AnswerHandler(fn func(*Query, *Answer)) { dx.answerHandler = fn }
+func (dx *DnsProxy) handleAnswer(q *Query, a *Answer) {
+    if dx.answerHandler == nil {
         return
     }
 
-    dx.responseHandler(r)
+    dx.answerHandler(q, a)
 }
 
-func (dx *DnsProxy) proxy(req *Request) {
-    // handle request here
+func (dx *DnsProxy) proxy(query *Query) {
+    // handle query here
     var wg sync.WaitGroup
     wg.Add(1)
 
     go func(wg *sync.WaitGroup) {
         defer wg.Done()
-        dx.handleRequest(req)
+        dx.handleQuery(query)
     }(&wg)
 
     upstream := <-dx.Remote
@@ -98,7 +98,7 @@ func (dx *DnsProxy) proxy(req *Request) {
 
     // Upstream / Remote
     // write
-    _, err := upstream.Write(req.bytes)
+    _, err := upstream.Write(query.bytes)
     if err != nil {
         panic(err)
     }
@@ -110,13 +110,13 @@ func (dx *DnsProxy) proxy(req *Request) {
         panic(err)
     }
 
-    // handle response here
-    resp := NewResponse(p)
-    dx.handleResponse(resp)
+    // handle answer here
+    answer := NewAnswer(p)
+    dx.handleAnswer(query, answer)
 
     // Downstream / Local
     // write
-    _, err = dx.Local.WriteTo(resp.bytes, req.conn)
+    _, err = dx.Local.WriteTo(answer.bytes, query.conn)
     if err != nil {
         panic(err)
     }
@@ -125,15 +125,15 @@ func (dx *DnsProxy) proxy(req *Request) {
 func (dx *DnsProxy) Accept() {
     for {
         // receiver
-        request := <-dx.Packet
-        _, addr, err := dx.Local.ReadFrom(request) // blocking
+        query := <-dx.Packet
+        _, addr, err := dx.Local.ReadFrom(query) // blocking
         if err != nil {
             // TODO log error here and move on?
             panic(err)
         }
 
         // offload to not block the receiver
-        go dx.proxy(NewRequest(request, addr))
+        go dx.proxy(NewQuery(query, addr))
     }
 }
 
