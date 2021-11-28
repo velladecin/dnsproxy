@@ -1,7 +1,7 @@
 package main
 
 import (
-    "fmt"
+_    "fmt"
 )
 
 func main() {
@@ -10,48 +10,78 @@ func main() {
         panic(err)
     }
 
-    dx.QueryHandler(func(r *Query){
+    dx.QueryHandler(func(q *Query){
+        q.Label()
+    /*
         fmt.Println(">>>>>>>>>>> Query")
-        id := r.Id()
+        id := q.Id()
         fmt.Printf(">>>>> id: %b\n", id)
 
-        flags := r.Flags()
+        flags := q.Flags()
         fmt.Printf(">>>>> fl: %b\n", flags)
 
-        qd := r.Qd()
+        qd := q.Qd()
         fmt.Printf(">>>>> qd: %b\n", qd)
 
-        an := r.An()
+        an := q.An()
         fmt.Printf(">>>>> an: %b\n", an)
 
-        ns := r.Ns()
+        ns := q.Ns()
         fmt.Printf(">>>>> ns: %b\n", ns)
 
-        ar := r.Ar()
+        ar := q.Ar()
         fmt.Printf(">>>>> ar: %b\n", ar)
+
+        l := Label(q.bytes[12:])
+        fmt.Printf("%+v\n", l)
+        */
     })
 
     dx.AnswerHandler(func(q *Query, a *Answer){
-        fmt.Println(">>>>>>>>>>> AnswerHandler")
-        qid := q.Id()
-        aid := a.Id()
-        fmt.Printf(">>>>> id: %b <> %b\n", qid, aid)
+        //q.Label()
+        a.Label()
 
-        qflags := q.Flags()
-        aflags := a.Flags()
-        fmt.Printf(">>>>> fl: %b <> %b\n", qflags, aflags)
+        /*
+        if qlabel[0] == "incoming.telemetry.mozilla.org" || qlabel[0] == "google.com" || qlabel[0] == "kdk01dkd.com" {
+            //fmt.Println(">>>>>>>>>>> AnswerHandler")
+            //qid := q.Id()
+            //aid := a.Id()
+            //fmt.Printf(">>>>> id: %b <> %b\n", qid, aid)
 
-        qd := a.Qd()
-        fmt.Printf(">>>>> qd: %b\n", qd)
+            //qflags := q.Flags()
+            //aflags := a.Flags()
+            //fmt.Printf(">>>>> fl: %b <> %b\n", qflags, aflags)
 
-        an := a.An()
-        fmt.Printf(">>>>> an: %b\n", an)
+            qqd := q.Qd()
+            aqd := a.Qd()
+            fmt.Printf(">>>>> qd: %b <> %b\n", qqd, aqd)
 
-        ns := a.Ns()
-        fmt.Printf(">>>>> ns: %b\n", ns)
+            qan := q.An()
+            aan := a.An()
+            fmt.Printf(">>>>> an: %b <> %b\n", qan, aan)
 
-        ar := a.Ar()
-        fmt.Printf(">>>>> ar: %b\n", ar)
+            qns := q.Ns()
+            ans := a.Ns()
+            fmt.Printf(">>>>> ns: %b <> %b\n", qns, ans)
+
+            qar := q.Ar()
+            aar := a.Ar()
+            fmt.Printf(">>>>> ar: %b <> %b\n", qar, aar)
+
+            fmt.Printf("S: %s\n", qlabel[0])
+            fmt.Println(">>>> QQQQ")
+            fmt.Printf("D: %d\n", q.bytes[12:])
+            //fmt.Printf("B: %b\n", q.bytes[12:])
+            fmt.Println(">>>> AAAA")
+            fmt.Printf("D: %d\n", a.bytes[12:])
+            fmt.Printf("B: %b\n", a.bytes[12:])
+
+            a.Label()
+            //o := a.Label()
+            //fmt.Println(len(o))
+            //fmt.Printf("%+v\n", o)
+        }
+        */
     })
 
     dx.Accept()
