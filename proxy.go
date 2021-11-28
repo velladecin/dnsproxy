@@ -37,7 +37,8 @@ type DnsProxy struct {
 
     // user defined handlers
     queryHandler func(*Query)
-    answerHandler func(*Query, *Answer)
+    answerHandler func(*Query, *Answer) // TODO this is already modified Query
+                                        // will we also need the original?
 }
 
 func NewDnsProxy(remote ...string) (*DnsProxy, error) {
@@ -124,7 +125,7 @@ func (dx *DnsProxy) proxy(query *Query) {
 
 func (dx *DnsProxy) Accept() {
     for {
-        // receiver
+        // question receiver
         query := <-dx.Packet
         _, addr, err := dx.Local.ReadFrom(query) // blocking
         if err != nil {
@@ -132,7 +133,7 @@ func (dx *DnsProxy) Accept() {
             panic(err)
         }
 
-        // offload to not block the receiver
+        // offload to free the receiver
         go dx.proxy(NewQuery(query, addr))
     }
 }
