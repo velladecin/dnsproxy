@@ -1,7 +1,7 @@
 package main
 
 import (
-_    "fmt"
+    "fmt"
 )
 
 func main() {
@@ -11,7 +11,12 @@ func main() {
     }
 
     dx.QueryHandler(func(q *Query){
-        q.Label()
+        //q.Label()
+        skel, err := PacketAutopsy(q)
+        if err != nil {
+            panic(err.Error())
+        }
+        fmt.Printf("Q: %+v\n\n", skel)
     /*
         fmt.Println(">>>>>>>>>>> Query")
         id := q.Id()
@@ -38,8 +43,14 @@ func main() {
     })
 
     dx.AnswerHandler(func(q *Query, a *Answer){
-        //q.Label()
-        a.Label()
+        //q.Label() // <<-- this works
+        fmt.Println()
+        fmt.Println()
+        skel, err := PacketAutopsy(a)
+        if err != nil {
+            panic(err.Error())
+        }
+        fmt.Printf("A: %+v\n", skel)
 
         /*
         if qlabel[0] == "incoming.telemetry.mozilla.org" || qlabel[0] == "google.com" || qlabel[0] == "kdk01dkd.com" {

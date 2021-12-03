@@ -481,6 +481,74 @@ func getTtlByPosition(p packet, pos int) int {
     return makeUint(bytes[pos:pos+4])
 }
 
+type pskel struct {
+    header, question, footer []byte
+    rr [][]byte
+}
+
+func PacketAutopsy(p packet) (*pskel, error) {
+    d := p.Data()
+    fmt.Printf("ALL: %d\n\n", d)
+
+    // header
+    skel := &pskel{header: d[:12]}
+
+    // question
+    for count:=12; count<len(d); count++ {
+        if d[count] == 0 {
+            // end of question followed by 2+2 bytes of type, class
+            skel.question = d[12:count+5]
+            break
+        }
+    }
+
+    cur_pos := len(skel.header) + len(skel.question)
+
+    // question label ends here
+    // type QUERY has got nothing else to do
+    if p.Type() == QUERY {
+        // verify end
+        if (d[cur_pos] | d[cur_pos+1] | d[cur_pos+2]) != 41 {
+            return skel, fmt.Errorf("QUERY packet corrupted")
+        }
+
+        skel.footer = d[cur_pos:]
+        return skel, nil
+    }
+
+    // answer
+    // L1                  TTL CLASS     TYPE   L2
+    // c1.domain.com.		10	  IN	CNAME	c2.domain.com.
+    // c2.domain.com.       10    IN        A   1.1.1.1
+
+    for count:=cur_pos; count<len(d); count++ {
+        // 0 is end of L1 (first byte of TYPE)
+        // 2 bytes of TYPE, 2 bytes of CLASS, 4 bytes of TTL
+        // 2 bytes of total length of L2
+        if d[count] == 0 {
+            fmt.Printf("===================: %d\n", count)
+            // verify end
+            if (d[count] | d[count+1] | d[count+2]) == 41 {
+                skel.footer = d[count:]
+                break
+            }
+
+            count += 7 // type, class, ttl
+            fmt.Printf("===================: %d\n", count)
+            L2_len := makeUint(d[count+1:count+1+2]) // L2 length, 2 bytes + 1 to accommodate range syntax
+            count += 2
+            count += L2_len // end
+
+            // don't increment count any further,
+            // it'll increment itself on top of loop
+            skel.rr = append(skel.rr, d[cur_pos:count+1])
+            cur_pos = count + 1
+        }
+    }
+
+    return skel, nil
+}
+
 type label struct {
     left, right string
     ttype, class string
