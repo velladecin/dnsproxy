@@ -5,6 +5,7 @@ import (
     "fmt"
 )
 
+/*
 const (
     // TYPE
     A = iota + 1
@@ -26,19 +27,17 @@ const (
 )
 
 func getType(i int) string {
-    var t string
     switch ; {
-        case i == A:    t = "A"
-        case i == NS:   t = "NS"
-        case i == CNAME:t = "CNAME"
-        case i == SOA:  t = "SOA"
-        case i == PTR:  t = "PTR"
-        case i == MX:   t = "MX"
-        case i == TXT:  t = "TXT"
-        default:        t = "OTHER"
+        case i == A:    return "A"
+        case i == NS:   return "NS"
+        case i == CNAME:return "CNAME"
+        case i == SOA:  return "SOA"
+        case i == PTR:  return "PTR"
+        case i == MX:   return "MX"
+        case i == TXT:  return "TXT"
     }
 
-    return t
+    return "OTHER"
 }
 
 const (
@@ -59,6 +58,7 @@ func getClass(i int) string {
 
     return t
 }
+*/
 
 // LABELS
 
@@ -114,6 +114,7 @@ const (
     QUESTION_LABEL = 12
     COMPRESSED_LABEL = 192  // 11000000
     END_LABEL = 41
+    LABEL_END = 41
     QUERY = iota
     ANSWER
 )
@@ -121,122 +122,6 @@ const (
 type packet interface {
     Type() int
     Data() []byte
-}
-
-func rightLabel(b []byte, i map[int]string, l label) (int, map[int]string, error) {
-    // 2 bytes of total label length
-    // work with those only
-    len_total := makeUint(b[0:2])
-    data := b[0:2+len_total]
-    //fmt.Printf("rightLabel:data: bytelen(%d), len_total(%d) => %+v\n", len(data), len_total, data)
-
-    var err error
-    var count int
-    index := make(map[int]string)
-    for count=2; count<len(data); {
-        length := int(data[count])
-        //fmt.Printf("------------------------ right length: %d\n", length)
-
-        if length == 0 { // root "." label (end of labal)
-            count++
-            break
-        }
-
-        var s string
-        var end int
-        if length == COMPRESSED_LABEL {
-            fmt.Println("----------- compressed -------")
-            pointer := int(data[count+1])
-
-            l, ok := i[pointer]
-            if !ok {
-                err = fmt.Errorf("right: Cannot find compression pointer(%d), count(%d)", pointer, count)
-                break
-            }
-
-            s = l
-            end = count + 2 // 2 bytes = compressed label + pointer
-        } else if l.ttype == "A" && l.class == "IN" {
-            for i:=count; i<count+len_total; i++ {
-                if s == "" {
-                    s = fmt.Sprintf("%d", data[i])
-                    continue
-                }
-
-                s = fmt.Sprintf("%s.%d", s, data[i])
-            }
-
-            end = len(data)
-            fmt.Printf("============>>>>: %d <> %d\n", count, end)
-        } else {
-            start := count + 1
-            end = start + length
-
-            s = string(data[start:end])
-        }
-
-        // index lookup
-        for key, val := range index {
-            index[key] = fmt.Sprintf("%s.%s", val, s)
-        }
-
-        if _, ok := index[count]; !ok {
-            index[count] = s
-        }
-
-        count = end
-    }
-
-    return count, index, err
-}
-
-func leftLabel(b []byte, i map[int]string) (int, map[int]string, error) {
-    index := make(map[int]string)
-    var err error
-    var count int
-    for count=0; count<len(b); {
-        length := int(b[count])
-
-        if length == 0 { // end of left label
-            break
-        }
-
-        if length == COMPRESSED_LABEL {
-            count++
-            pointer := int(b[count])
-
-            l, ok := i[pointer]
-            if !ok {
-                err = fmt.Errorf("Cannot find compression pointer(%d), count(%d)", pointer, count)
-                break
-            }
-
-            // TODO logic - can this be partial label?
-            index[count] = l
-            count++
-
-            continue
-        }
-
-        start := count + 1
-        end := start + length
-
-        s := string(b[start:end])
-
-        // index lookup
-        for key, val := range index {
-            index[key] = fmt.Sprintf("%s.%s", val, s)     
-        }
-
-        if _, ok := index[count]; !ok {
-            index[count] = s
-        }
-
-        // next label length byte
-        count = end
-    }
-
-    return count, index, err
 }
 
 /*
@@ -347,51 +232,6 @@ func NewQuery(b []byte, addr net.Addr) *Query {
 func (q *Query) Type() int { return QUERY }
 func (q *Query) Data() []byte { return q.bytes }
 
-func (q *Query) Label() []string {
-    fmt.Printf("qdecim: %d\n", q.bytes)
-
-    label_index := make(map[int]string)
-    for count:=QUESTION_LABEL; count<len(q.bytes); {
-        if makeUint(q.bytes[count:count+3]) == END_LABEL {
-            //fmt.Println(">>>>>>>>>>>>>>>>>>>> END<<<<<<<<<<<<")
-            break
-        }
-
-        fmt.Printf("------------------------ Query => LEFT (only) ------------------------ count: %d\n", count)
-        pos, i, err := leftLabel(q.bytes[count:], label_index)
-        if err != nil {
-            panic(err)
-        }
-
-        // "i" is index relative to current position (count)
-        // lowest index is the full label
-        lowest_idx := -1
-        for index, label := range i {
-            idx := index + count
-            label_index[idx] = label
-
-            if lowest_idx == -1 {
-                lowest_idx = idx
-            } else {
-                if idx < lowest_idx {
-                    lowest_idx = idx
-                }
-            }
-        }
-
-        // question label is single (left) label
-        // move to next byte after the end of it
-        count += (pos + 1)
-
-        ttype, class := getTypeClassByPosition(q, count)
-        count += 4
-
-        fmt.Printf("query.Label():QUESTION: %s %s %s\n", label_index[lowest_idx], class, ttype)
-    }
-
-    return []string{}
-}
-
 func (r *Query) Id() []byte { return r.bytes[id:id+2] }
 func (r *Query) SetId(b []byte) error {
     if len(b) < 2 {
@@ -471,33 +311,40 @@ func NewAnswer(b []byte) *Answer {
 func (a *Answer) Type() int { return ANSWER }
 func (a *Answer) Data() []byte { return a.bytes }
 
-func getTypeClassByPosition(p packet, pos int) (string, string) {
-    bytes := p.Data()
-    return getType(makeUint(bytes[pos:pos+2])), getClass(makeUint(bytes[pos+2:pos+2+2]))
-}
-
-func getTtlByPosition(p packet, pos int) int {
-    bytes := p.Data()
-    return makeUint(bytes[pos:pos+4])
-}
-
 type pskel struct {
     header, question, footer []byte
     rr [][]byte
 }
+
+func (p *pskel) Id()      []byte { return p.header[:2] }
+func (p *pskel) Flags()   []byte { return p.header[2:4] }
+func (p *pskel) Qdcount() []byte { return p.header[4:6] }
+func (p *pskel) Ancount() []byte { return p.header[6:8] }
+func (p *pskel) Nscount() []byte { return p.header[8:10] }
+func (p *pskel) Arcount() []byte { return p.header[10:12] }
+func (p *pskel) Question()[]byte { return p.question }
+func (p *pskel) Rr()    [][]byte { return p.rr }
+
+func (p *pskel) SetNxDomain() { p.header[3] |= NXDOMAIN } // opcode
+
+/*
+func (p *pskel) Qr() byte { return p.header[13] }
+func (p *pskel) QrQuery() { }
+func (p *pskel) QrAnswer() { }
+*/
 
 func PacketAutopsy(p packet) (*pskel, error) {
     d := p.Data()
     fmt.Printf("ALL: %d\n\n", d)
 
     // header
-    skel := &pskel{header: d[:12]}
+    skel := &pskel{header: d[:QUESTION_LABEL]}
 
     // question
-    for count:=12; count<len(d); count++ {
+    for count:=QUESTION_LABEL; count<len(d); count++ {
         if d[count] == 0 {
             // end of question followed by 2+2 bytes of type, class
-            skel.question = d[12:count+5]
+            skel.question = d[QUESTION_LABEL:count+5]
             break
         }
     }
@@ -507,8 +354,8 @@ func PacketAutopsy(p packet) (*pskel, error) {
     // question label ends here
     // type QUERY has got nothing else to do
     if p.Type() == QUERY {
-        // verify end
-        if (d[cur_pos] | d[cur_pos+1] | d[cur_pos+2]) != 41 {
+        // verify end, is this really needed?
+        if (d[cur_pos] | d[cur_pos+1] | d[cur_pos+2]) != LABEL_END {
             return skel, fmt.Errorf("QUERY packet corrupted")
         }
 
@@ -528,7 +375,7 @@ func PacketAutopsy(p packet) (*pskel, error) {
         if d[count] == 0 {
             fmt.Printf("===================: %d\n", count)
             // verify end
-            if (d[count] | d[count+1] | d[count+2]) == 41 {
+            if (d[count] | d[count+1] | d[count+2]) == LABEL_END {
                 skel.footer = d[count:]
                 break
             }
@@ -547,129 +394,6 @@ func PacketAutopsy(p packet) (*pskel, error) {
     }
 
     return skel, nil
-}
-
-type label struct {
-    left, right string
-    ttype, class string
-    ttl int
-}
-
-func (a *Answer) Label() []string {
-    fmt.Printf("adecim: %d\n", a.bytes)
-
-    labelz := make([]label, 0)
-
-    left_label := true
-    label_index := make(map[int]string)
-    for count:=QUESTION_LABEL; count<len(a.bytes); {
-        fmt.Printf("EEEEEENDDDDDDD: %d\n", a.bytes[count:count+3])
-        if makeUint(a.bytes[count:count+3]) == END_LABEL {
-            fmt.Println(">>>>>>>>>>>>>>>>>>>> END<<<<<<<<<<<<")
-            break
-        }
-
-        //fmt.Println(count)
-
-        var pos int
-        var i map[int]string
-        var err error
-
-        if left_label {
-            fmt.Printf("------------------------ LEFT ------------------------ count: %d\n", count)
-            pos, i, err = leftLabel(a.bytes[count:], label_index)
-        } else {
-            fmt.Printf("------------------------ RIGHT ------------------------ count: %d\n", count)
-            pos, i, err = rightLabel(a.bytes[count:], label_index, labelz[len(labelz)-1])
-        }
-
-        if err != nil {
-            panic(err)
-        }
-
-        // "i" is index relative to current position (count)
-        // lowest index is the full label
-        lowest_idx := -1
-        for index, label := range i {
-            idx := index + count
-            label_index[idx] = label
-
-            if lowest_idx == -1 {
-                lowest_idx = idx
-            } else {
-                if idx < lowest_idx {
-                    lowest_idx = idx
-                }
-            }
-        }
-
-        if left_label {
-            var ttype, class string
-            var ttl int
-            if count == QUESTION_LABEL {
-                // question label is single (left) label
-                // move to next byte after the end of it
-                count += (pos + 1)
-
-                ttype, class = getTypeClassByPosition(a, count)
-                count += 4
-
-                // always first label and without right side
-                fmt.Printf("QUESTION: %s %s %s\n", label_index[lowest_idx], class, ttype)
-            } else {
-                // answer label is left + right label set
-                // and possible multiples of those
-                count += pos
-
-                ttype, class = getTypeClassByPosition(a, count)
-                count += 4
-                ttl = getTtlByPosition(a, count)
-                count += 4
-
-                left_label = false // end of left label
-
-                // N+1 label - beginning of
-                fmt.Printf("ANSWER left: %s %s %s %d\n", label_index[lowest_idx], class, ttype, ttl)
-            }
-
-            labelz = append(labelz, label {
-                left: label_index[lowest_idx],
-                class: class,
-                ttype: ttype,
-                ttl: ttl,
-            })
-
-            //fmt.Printf("LEFT count: %d <> pos: %d <> lowest: %d\n", count, pos, lowest_idx)
-            //fmt.Printf("LEFT i: %+v\n", i)
-            //fmt.Printf("LEFT %+v\n", label_index)
-            //fmt.Printf("LEFT %d\n", a.bytes[count:])
-            //fmt.Printf("LEFT err: %+v\n", err)
-        } else {
-            count += pos
-            left_label = true
-
-            // label already exists only missing right side
-            labelz[len(labelz)-1].right = label_index[lowest_idx]
-
-            fmt.Printf("ANSWER right: %s\n", label_index[lowest_idx])
-            //fmt.Printf("RGHT:count: %d <> pos: %d <> lowest: %d\n", count, pos, lowest_idx)
-            //fmt.Printf("RGHT:i: %+v\n", i)
-            //fmt.Printf("RGHT:index: %+v\n", label_index)
-            //fmt.Printf("RGHT: %d\n", a.bytes[count:])
-            //fmt.Printf("RGHT:err: %+v\n", err)
-        }
-
-        if count >= 210 {
-            break
-        }
-    }
-
-    //fmt.Printf("%+v\n", labelz)
-    for _, l := range labelz {
-        fmt.Printf("%+v\n", l)
-    }
-
-    return []string{}
 }
 
 func (r *Answer) Id() []byte { return r.bytes[id:id+2] }
