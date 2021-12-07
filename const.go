@@ -65,3 +65,13 @@ const (
     NOTAUTH
     NOTZONE
 )
+
+// OPCODE
+const (
+    QUERY = iota
+    IQUERY      // obsolete rfc6895
+    STATUS
+    _
+    NOTIFY
+    UPDATE
+)
