@@ -5,61 +5,6 @@ import (
     "fmt"
 )
 
-/*
-const (
-    // TYPE
-    A = iota + 1
-    NS
-    MD          // obsolete use MX (mail destination)
-    MF          // obsolete use MX (mail forwarder)
-    CNAME
-    SOA
-    MB          // experimental (mail box)
-    MG          // experimental (mail group member)
-    MR          // experimental (mail rename domain name)
-    NULL        // experimental
-    WKS         // well known service description
-    PTR
-    HINFO       // host info
-    MINFO       // mailbox info
-    MX
-    TXT
-)
-
-func getType(i int) string {
-    switch ; {
-        case i == A:    return "A"
-        case i == NS:   return "NS"
-        case i == CNAME:return "CNAME"
-        case i == SOA:  return "SOA"
-        case i == PTR:  return "PTR"
-        case i == MX:   return "MX"
-        case i == TXT:  return "TXT"
-    }
-
-    return "OTHER"
-}
-
-const (
-    // CLASS
-    IN = iota + 1
-    CS          // obsolete
-    CH          // chaos
-    HS          // hesiod
-)
-
-func getClass(i int) string {
-    var t string
-    switch ; {
-        case i == IN:   t = "IN"
-        case i == CH:   t = "CH"
-        default:        t = "OTHER"
-    }
-
-    return t
-}
-*/
-
 // LABELS
 
 /*
@@ -115,7 +60,8 @@ const (
     COMPRESSED_LABEL = 192  // 11000000
     END_LABEL = 41
     LABEL_END = 41
-    QUERY = iota
+    //QUERY = iota
+    QUESTION = iota
     ANSWER
 )
 
@@ -325,13 +271,42 @@ func (p *pskel) Arcount() []byte { return p.header[10:12] }
 func (p *pskel) Question()[]byte { return p.question }
 func (p *pskel) Rr()    [][]byte { return p.rr }
 
-func (p *pskel) SetNxDomain() { p.header[3] |= NXDOMAIN } // opcode
+//
+// Flags
 
-/*
-func (p *pskel) Qr() byte { return p.header[13] }
-func (p *pskel) QrQuery() { }
-func (p *pskel) QrAnswer() { }
-*/
+// qr
+func (p *pskel) SetQuery() { p.header[2] |= 128 }
+func (p *pskel) SetAnswer() { p.header[2], _ = unsetBit(p.header[2], 7) }
+
+// opcode
+func (p *pskel) UnsetOpcode() { p.header[2], _ = unsetBit(p.header[2], 6, 5, 4, 3) }
+func (p *pskel) SetOpcode(i int) error {
+    if i < QUERY || i > UPDATE {
+        return fmt.Errorf("Wrong OPCODE") // TODO Error
+    }
+
+    p.UnsetOpcode()
+    p.header[2] |= uint8(i)
+    return nil
+}
+
+// rcode
+func (p *pskel) UnsetRcode() { p.header[3], _ = unsetBit(p.header[3], 3, 2, 1, 0) }
+func (p *pskel) SetRcode(i int) error {
+    if i < NOERR || i > NOTZONE {
+        return fmt.Errorf("Wrong RCODE") // TODO Error
+    }
+
+    p.UnsetRcode()
+    p.header[3] |= uint8(i)
+    return nil
+}
+func (p *pskel) SetNoErr() { p.UnsetRcode() } // noerr is 0
+func (p *pskel) SetFormErr() { p.SetRcode(FORMERR) }
+func (p *pskel) SetServFail() { p.SetRcode(SERVFAIL) }
+func (p *pskel) SetNxDomain() { p.SetRcode(NXDOMAIN) }
+func (p *pskel) SetNotImp() { p.SetRcode(NOTIMP) }
+func (p *pskel) SetRefused() { p.SetRcode(REFUSED) }
 
 func PacketAutopsy(p packet) (*pskel, error) {
     d := p.Data()
@@ -352,11 +327,11 @@ func PacketAutopsy(p packet) (*pskel, error) {
     cur_pos := len(skel.header) + len(skel.question)
 
     // question label ends here
-    // type QUERY has got nothing else to do
-    if p.Type() == QUERY {
+    // type QUESTION/QUERY has got nothing else to do
+    if p.Type() == QUESTION {
         // verify end, is this really needed?
         if (d[cur_pos] | d[cur_pos+1] | d[cur_pos+2]) != LABEL_END {
-            return skel, fmt.Errorf("QUERY packet corrupted")
+            return skel, fmt.Errorf("QUESTION packet corrupted")
         }
 
         skel.footer = d[cur_pos:]
@@ -464,6 +439,25 @@ func (r *Answer) SetAr(b []byte) error {
 
 
 // helpers
+func unsetBit(b byte, pos ...int) (byte, error) {
+    if len(pos) < 1 || len(pos) > 8 {
+        return b, fmt.Errorf("1-8 bits in byte, got: %d", len(pos))
+    }
+
+    bb := b
+    for _, p := range pos {
+        pi := int(p)
+        if pi < 0 || pi > 7 {
+            return bb, fmt.Errorf("0-7 bit indexes in byte, got: %d", pi)
+        }
+
+        b |= (1<<pi)
+        b ^= (1<<pi)
+    }
+
+    return b, nil
+}
+
 func makeUint(b []byte) int {
     var i int
     switch len(b) {
@@ -477,7 +471,7 @@ func makeUint(b []byte) int {
     return i
 }
 
-func queryHeadersModError(field string) error { return getHeadersModError(field, QUERY) }
+func queryHeadersModError(field string) error { return getHeadersModError(field, QUESTION) }
 func answerHeadersModError(field string) error { return getHeadersModError(field, ANSWER) }
 func getHeadersModError(field string, request int) error {
     r := "query"
