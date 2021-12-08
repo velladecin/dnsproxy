@@ -5,9 +5,15 @@ import (
 )
 
 type HeadersModError struct {
-    err, request string
+    err string
+    request int
 }
 
 func (e *HeadersModError) Error() string {
-    return fmt.Sprintf("%s in %s", e.err, e.request)
+    req := "ANSWER"
+    if e.request == QUERY {
+        req = "QUERY"
+    }
+
+    return fmt.Sprintf("%s in %s packet", e.err, req)
 }
