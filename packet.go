@@ -61,8 +61,8 @@ const (
     END_LABEL = 41
     LABEL_END = 41
     //QUERY = iota
-    QUESTION = iota
-    ANSWER
+    //QUESTION = iota
+    //ANSWER
 )
 
 type packet interface {
@@ -175,75 +175,11 @@ func NewQuery(b []byte, addr net.Addr) *Query {
     return &Query{b, addr}
 }
 
-func (q *Query) Type() int { return QUERY }
 func (q *Query) Data() []byte { return q.bytes }
-
-func (r *Query) Id() []byte { return r.bytes[id:id+2] }
-func (r *Query) SetId(b []byte) error {
-    if len(b) < 2 {
-        return queryHeadersModError("ID")
-    }
-
-    r.bytes[id] = b[0]
-    r.bytes[id+1] = b[1]
-    return nil
+func (q *Query) Type() int {
+    i, _ := getBit(q.bytes[2], QR)
+    return i
 }
-
-func (r *Query) Flags() []byte { return r.bytes[flags:flags+2] }
-func (r *Query) SetFlags(b []byte) error {
-    if len(b) < 2 {
-        return queryHeadersModError("FLAGS")
-    }
-
-    r.bytes[flags] = b[0]
-    r.bytes[flags+1] = b[1]
-    return nil
-}
-
-func (r *Query) Qd() []byte { return r.bytes[qd:qd+2] }
-func (r *Query) SetQd(b []byte) error {
-    if len(b) < 2 {
-        return queryHeadersModError("QD")
-    }
-
-    r.bytes[qd] = b[0]
-    r.bytes[qd+1] = b[1]
-    return nil
-}
-
-func (r *Query) An() []byte { return r.bytes[an:an+2] }
-func (r *Query) SetAn(b []byte) error {
-    if len(b) < 2 {
-        return queryHeadersModError("AN")
-    }
-
-    r.bytes[an] = b[0]
-    r.bytes[an+1] = b[1]
-    return nil
-}
-
-func (r *Query) Ns() []byte { return r.bytes[ns:ns+2] }
-func (r *Query) SetNs(b []byte) error {
-    if len(b) < 2 {
-        return queryHeadersModError("NS")
-    }
-
-    r.bytes[ns] = b[0]
-    r.bytes[ns+1] = b[1]
-    return nil
-}
-
-func (r *Query) Ar() []byte { return r.bytes[ar:ar+2] }
-func (r *Query) SetAr(b []byte) error {
-    if len(b) < 2 {
-        return queryHeadersModError("AR")
-    }
-
-    r.bytes[ar] = b[0]
-    r.bytes[ar+1] = b[1]
-    return nil
-}
-
 
 // Answer
 type Answer struct {
@@ -254,8 +190,11 @@ func NewAnswer(b []byte) *Answer {
     return &Answer{b}
 }
 
-func (a *Answer) Type() int { return ANSWER }
 func (a *Answer) Data() []byte { return a.bytes }
+func (a *Answer) Type() int {
+    i, _ := getBit(a.bytes[2], QR)
+    return i
+}
 
 type pskel struct {
     header, question, footer []byte
@@ -277,12 +216,32 @@ func (p *pskel) Rr()    [][]byte { return p.rr }
 // qr
 func (p *pskel) SetQuery() { p.header[2] |= 128 }
 func (p *pskel) SetAnswer() { p.header[2], _ = unsetBit(p.header[2], 7) }
+/*
+func queryHeadersModError(field string) error { return getHeadersModError(field, QUESTION) }
+func answerHeadersModError(field string) error { return getHeadersModError(field, ANSWER) }
+func getHeadersModError(field string, request int) error {
+    r := "query"
+    if request == ANSWER {
+        r = "answer"
+    }
+
+    return &HeadersModError{
+        err: fmt.Sprintf("%s missing input bytes", field),
+        request: r,
+    }
+}
+*/
 
 // opcode
 func (p *pskel) UnsetOpcode() { p.header[2], _ = unsetBit(p.header[2], 6, 5, 4, 3) }
 func (p *pskel) SetOpcode(i int) error {
     if i < QUERY || i > UPDATE {
-        return fmt.Errorf("Wrong OPCODE") // TODO Error
+        j, _ := getBit(p.header[2], QR)
+
+        return &HeadersModError{
+            err: fmt.Sprintf("OPCODE set to invalid value(%d)", i),
+            request: j,
+        }
     }
 
     p.UnsetOpcode()
@@ -294,7 +253,12 @@ func (p *pskel) SetOpcode(i int) error {
 func (p *pskel) UnsetRcode() { p.header[3], _ = unsetBit(p.header[3], 3, 2, 1, 0) }
 func (p *pskel) SetRcode(i int) error {
     if i < NOERR || i > NOTZONE {
-        return fmt.Errorf("Wrong RCODE") // TODO Error
+        j, _ := getBit(p.header[2], QR)
+
+        return &HeadersModError{
+            err: fmt.Sprintf("RCODE set to invalid value(%d)", i),
+            request: j,
+        }
     }
 
     p.UnsetRcode()
@@ -327,11 +291,11 @@ func PacketAutopsy(p packet) (*pskel, error) {
     cur_pos := len(skel.header) + len(skel.question)
 
     // question label ends here
-    // type QUESTION/QUERY has got nothing else to do
-    if p.Type() == QUESTION {
+    // type QUERY has got nothing else to do
+    if p.Type() == QUERY {
         // verify end, is this really needed?
         if (d[cur_pos] | d[cur_pos+1] | d[cur_pos+2]) != LABEL_END {
-            return skel, fmt.Errorf("QUESTION packet corrupted")
+            return skel, fmt.Errorf("QUERY packet corrupted")
         }
 
         skel.footer = d[cur_pos:]
@@ -348,7 +312,6 @@ func PacketAutopsy(p packet) (*pskel, error) {
         // 2 bytes of TYPE, 2 bytes of CLASS, 4 bytes of TTL
         // 2 bytes of total length of L2
         if d[count] == 0 {
-            fmt.Printf("===================: %d\n", count)
             // verify end
             if (d[count] | d[count+1] | d[count+2]) == LABEL_END {
                 skel.footer = d[count:]
@@ -356,7 +319,6 @@ func PacketAutopsy(p packet) (*pskel, error) {
             }
 
             count += 7 // type, class, ttl
-            fmt.Printf("===================: %d\n", count)
             L2_len := makeUint(d[count+1:count+1+2]) // L2 length, 2 bytes + 1 to accommodate range syntax
             count += 2
             count += L2_len // end
@@ -370,73 +332,6 @@ func PacketAutopsy(p packet) (*pskel, error) {
 
     return skel, nil
 }
-
-func (r *Answer) Id() []byte { return r.bytes[id:id+2] }
-func (r *Answer) SetId(b []byte) error {
-    if len(b) < 2 {
-        return answerHeadersModError("ID")
-    }
-
-    r.bytes[id] = b[0]
-    r.bytes[id+1] = b[1]
-    return nil
-}
-
-func (r *Answer) Flags() []byte { return r.bytes[flags:flags+2] }
-func (r *Answer) SetFlags(b []byte) error {
-    if len(b) < 2 {
-        return answerHeadersModError("FLAGS")
-    }
-
-    r.bytes[flags] = b[0]
-    r.bytes[flags+1] = b[1]
-    return nil
-}
-
-func (r *Answer) Qd() []byte { return r.bytes[qd:qd+2] }
-func (r *Answer) SetQd(b []byte) error {
-    if len(b) < 2 {
-        return answerHeadersModError("QD")
-    }
-
-    r.bytes[qd] = b[0]
-    r.bytes[qd+1] = b[1]
-    return nil
-}
-
-func (r *Answer) An() []byte { return r.bytes[an:an+2] }
-func (r *Answer) SetAn(b []byte) error {
-    if len(b) < 2 {
-        return answerHeadersModError("AN")
-    }
-
-    r.bytes[an] = b[0]
-    r.bytes[an+1] = b[1]
-    return nil
-}
-
-func (r *Answer) Ns() []byte { return r.bytes[ns:ns+2] }
-func (r *Answer) SetNs(b []byte) error {
-    if len(b) < 2 {
-        return answerHeadersModError("NS")
-    }
-
-    r.bytes[ns] = b[0]
-    r.bytes[ns+1] = b[1]
-    return nil
-}
-
-func (r *Answer) Ar() []byte { return r.bytes[ar:ar+2] }
-func (r *Answer) SetAr(b []byte) error {
-    if len(b) < 2 {
-        return answerHeadersModError("AR")
-    }
-
-    r.bytes[ar] = b[0]
-    r.bytes[ar+1] = b[1]
-    return nil
-}
-
 
 // helpers
 func unsetBit(b byte, pos ...int) (byte, error) {
@@ -458,6 +353,18 @@ func unsetBit(b byte, pos ...int) (byte, error) {
     return b, nil
 }
 
+func getBit(b byte, pos int) (int, error) {
+    if pos < 0 || pos > 7 {
+        return -1, fmt.Errorf("0-7 bit indexes in byte, got: %d", pos)
+    }
+
+    if (b & (1<<pos)) == 0 {
+        return 0, nil
+    }
+
+    return 1, nil
+}
+
 func makeUint(b []byte) int {
     var i int
     switch len(b) {
@@ -471,6 +378,7 @@ func makeUint(b []byte) int {
     return i
 }
 
+/*
 func queryHeadersModError(field string) error { return getHeadersModError(field, QUESTION) }
 func answerHeadersModError(field string) error { return getHeadersModError(field, ANSWER) }
 func getHeadersModError(field string, request int) error {
@@ -484,6 +392,7 @@ func getHeadersModError(field string, request int) error {
         request: r,
     }
 }
+*/
 
 func packetFactory(ch chan []byte) chan []byte {
     go func() {
