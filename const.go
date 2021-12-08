@@ -51,6 +51,34 @@ func getClass(i int) string {
     return "OTHER_C"
 }
 
+//
+// Flags
+
+// byte[2]
+const (
+    RD = iota
+    TC
+    AA
+    _ // opcode start
+    _
+    _
+    _ // opcode end
+    QR
+)
+
+// OPCODE
+const (
+    QUERY = iota
+    IQUERY      // obsolete rfc6895
+    STATUS
+    _
+    NOTIFY
+    UPDATE
+)
+
+
+// byte[3]
+
 // RCODE
 const (
     NOERR = iota
@@ -64,14 +92,4 @@ const (
     _
     NOTAUTH
     NOTZONE
-)
-
-// OPCODE
-const (
-    QUERY = iota
-    IQUERY      // obsolete rfc6895
-    STATUS
-    _
-    NOTIFY
-    UPDATE
 )
