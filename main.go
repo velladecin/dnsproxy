@@ -17,29 +17,6 @@ func main() {
             panic(err.Error())
         }
         fmt.Printf("Q: %+v\n\n", skel)
-    /*
-        fmt.Println(">>>>>>>>>>> Query")
-        id := q.Id()
-        fmt.Printf(">>>>> id: %b\n", id)
-
-        flags := q.Flags()
-        fmt.Printf(">>>>> fl: %b\n", flags)
-
-        qd := q.Qd()
-        fmt.Printf(">>>>> qd: %b\n", qd)
-
-        an := q.An()
-        fmt.Printf(">>>>> an: %b\n", an)
-
-        ns := q.Ns()
-        fmt.Printf(">>>>> ns: %b\n", ns)
-
-        ar := q.Ar()
-        fmt.Printf(">>>>> ar: %b\n", ar)
-
-        l := Label(q.bytes[12:])
-        fmt.Printf("%+v\n", l)
-        */
     })
 
     dx.AnswerHandler(func(q *Query, a *Answer){
