@@ -10,10 +10,23 @@ type HeadersModError struct {
 }
 
 func (e *HeadersModError) Error() string {
-    req := "ANSWER"
-    if e.request == QUERY {
-        req = "QUERY"
-    }
+    return fmt.Sprintf("%s in %s packet", e.err, getRequestString(e.request))
+}
 
-    return fmt.Sprintf("%s in %s packet", e.err, req)
+type HeadersUnknownFieldError struct {
+    err string
+    val int
+}
+
+func (e *HeadersUnknownFieldError) Error() string {
+    return fmt.Sprintf("%s, val(%d)", e.err, e.val)
+}
+
+type LabelModError struct {
+    err string
+    request int
+}
+
+func (e *LabelModError) Error() string {
+    return fmt.Sprintf("%s in %s(%d)", e.err, getRequestString(e.request))
 }
