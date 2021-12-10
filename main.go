@@ -17,6 +17,13 @@ func main() {
             panic(err.Error())
         }
         fmt.Printf("Q: %+v\n\n", skel)
+        fmt.Printf("Q qdcount: %d\n", skel.GetQdcount())
+        fmt.Printf("Q ancount: %d\n", skel.GetAncount())
+        fmt.Printf("Q nscount: %d\n", skel.GetNscount())
+        fmt.Printf("Q arcount: %d\n", skel.GetArcount())
+
+        question := skel.GetQuestion()
+        fmt.Println(question)
     })
 
     dx.AnswerHandler(func(q *Query, a *Answer){
@@ -41,8 +48,13 @@ func main() {
         skel.SetNotImp()
         fmt.Printf("%b\n", skel.header)
 
-        skel.SetNxDomain()
-        fmt.Printf("%b\n", skel.header)
+        //skel.SetNxDomain()
+        //fmt.Printf("%b\n", skel.header)
+
+        fmt.Printf("A qdcount: %d\n", skel.GetQdcount())
+        fmt.Printf("A ancount: %d\n", skel.GetAncount())
+        fmt.Printf("A nscount: %d\n", skel.GetNscount())
+        fmt.Printf("A arcount: %d\n", skel.GetArcount())
 
         /*
         if qlabel[0] == "incoming.telemetry.mozilla.org" || qlabel[0] == "google.com" || qlabel[0] == "kdk01dkd.com" {
