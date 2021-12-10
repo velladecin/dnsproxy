@@ -5,165 +5,13 @@ import (
     "fmt"
 )
 
-// LABELS
-
-/*
-    // Question
-                                    1  1  1  1  1  1
-      0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                                               |
-    /                     QNAME                     /
-    /                                               /
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                     QTYPE                     |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                     QCLASS                    |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-
-;; QUESTION SECTION:
-;incoming.telemetry.mozilla.org.	IN	A
-
-
-    // Answer (DNS RR)
-    // question (above) followed by N+1 answers (bellow)
-                                  1  1  1  1  1  1
-    0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                                               |
-    /                                               /
-    /                     NAME                      /
-    /                                               /
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                     TYPE                      |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                     CLASS                     |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                     TTL                       |
-    |                                               |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                   RDLENGTH                    |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
-    /                    RDATA                      /
-    /                                               /
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-
-;; ANSWER SECTION:
-incoming.telemetry.mozilla.org.	                    51  IN  CNAME	telemetry-incoming.r53-2.services.mozilla.com.
-telemetry-incoming.r53-2.services.mozilla.com.      300 IN  CNAME   telemetry-incoming-b.r53-2.services.mozilla.com.
-telemetry-incoming-b.r53-2.services.mozilla.com.    300 IN	CNAME   prod.ingestion-edge.prod.dataops.mozgcp.net.
-prod.ingestion-edge.prod.dataops.mozgcp.net.        60	IN  A       35.227.207.240
-*/
-
-const (
-    QUESTION_LABEL = 12
-    COMPRESSED_LABEL = 192  // 11000000
-    END_LABEL = 41
-    LABEL_END = 41
-    //QUERY = iota
-    //QUESTION = iota
-    //ANSWER
-)
-
 type packet interface {
     Type() int
     Data() []byte
 }
 
-/*
-    The below are the same RFC but latest (Nov 2021) and older versions.
-    The older versions, though, do have some nice explanations.
-    https://datatracker.ietf.org/doc/html/rfc6895
-    https://datatracker.ietf.org/doc/html/rfc6840
-    http://www.networksorcery.com/enp/rfc/rfc1035.txt
-
-    Headers:
-
-                                   1  1  1  1  1  1
-     0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                      ID                       |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |QR|   OpCode  |AA|TC|RD|RA| Z|AD|CD|   RCODE   |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                QDCOUNT/ZOCOUNT                |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                ANCOUNT/PRCOUNT                |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                NSCOUNT/UPCOUNT                |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                    ARCOUNT                    |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-
-    // Qr - Type of Query
-    //   0 query
-    //   1 response
-
-    // Opcode - Kind of query
-    //   0 query
-    //   1 inverse query (obsolete)
-    //   2 status
-    //   3 unassigned
-    //   4 notify
-    //   5 update
-    //   6-15 future use
-
-    // Aa - Authoritative Answer
-    //   only used in response
-
-    // Tc - Truncation
-
-    // Rd - Recursion desired
-    //   expected to be copied from query to response
-
-    // Ra - Recursion available
-    //   only used in response
-
-    // Z - Future use
-    //   should (must?) be 0
-
-    // Ad - Authentic Data
-    //   see https://datatracker.ietf.org/doc/html/rfc6840#section-5.7 (if interested)
-
-    // Cd - Checking disabled
-    //   expected to be copied from query to response, should be always set
-    //   see https://datatracker.ietf.org/doc/html/rfc6840#section-5.9 (if interested)
-
-    // Rcode - Response code
-    //   0 no error
-    //   1 format error
-    //   2 server failure
-    //   3 nxdomain
-    //   4 not implemented (literally error code)
-    //   5 refused
-    //   6 name exists when it should not
-    //   7 RR set exists when it should not
-    //   8 RR does not exist when it should
-    //   9 server not auth for zone OR not authorized
-    //   10 name not in zone
-    //   11-15 future use
-    //   there are others, see RFC for details
-
-    // Qdcount - Number of entries in question section
-
-    // Ancount - Number of RRs in answer question
-
-    // Nscount - Number of NS in authority section
-
-    // Arcount - Number of record in additional records section
-*/
-
-const (
-    id = iota << 1
-    flags
-    qd
-    an
-    ns
-    ar
-)
-
 // Query + Answer
-// simple wrappers around byte slices to handle headers modifications
+// small diff between these two.. should they be merged?
 
 // Query
 type Query struct {
@@ -171,10 +19,7 @@ type Query struct {
     conn net.Addr
 }
 
-func NewQuery(b []byte, addr net.Addr) *Query {
-    return &Query{b, addr}
-}
-
+func NewQuery(b []byte, addr net.Addr) *Query { return &Query{b, addr} }
 func (q *Query) Data() []byte { return q.bytes }
 func (q *Query) Type() int {
     i, _ := getBit(q.bytes[2], QR)
@@ -186,16 +31,14 @@ type Answer struct {
     bytes []byte
 }
 
-func NewAnswer(b []byte) *Answer {
-    return &Answer{b}
-}
-
+func NewAnswer(b []byte) *Answer { return &Answer{b} }
 func (a *Answer) Data() []byte { return a.bytes }
 func (a *Answer) Type() int {
     i, _ := getBit(a.bytes[2], QR)
     return i
 }
 
+// packet skeleton
 type pskel struct {
     header, question, footer []byte
     rr [][]byte
@@ -209,38 +52,63 @@ func (p *pskel) Nscount() []byte { return p.header[8:10] }
 func (p *pskel) Arcount() []byte { return p.header[10:12] }
 func (p *pskel) Question()[]byte { return p.question }
 func (p *pskel) Rr()    [][]byte { return p.rr }
+func (p *pskel) getRequestType() int {
+    i, _ := getBit(p.header[2], QR)
+    return i
+}
+
+//
+// Labels
+
+// question
+func (p *pskel) GetQuestion() string {
+    var l string
+    for i:=0; i<len(p.question); {
+        llen := int(p.question[i]) // length of label
+        if llen == 0 {
+            break
+        }
+
+        // move to beginning of label and collect it
+        i++
+        l1 := string(p.question[i:i+llen])
+        // initate new or append
+        if l == "" {
+            l = l1
+        } else {
+            l = fmt.Sprintf("%s.%s", l, l1)
+        }
+        // move on to next one
+        i += llen
+    }
+
+    return l
+}
+
+func (p *pskel) SetQuestion(q string) error {
+    if len(q) == 0 {
+        return &LabelModError{
+            err: "Label cannot be zero length",
+            request: p.getRequestType(),
+        }
+    }
+    // TODO TODO TODO
+}
 
 //
 // Flags
 
 // qr
-func (p *pskel) SetQuery() { p.header[2] |= 128 }
-func (p *pskel) SetAnswer() { p.header[2], _ = unsetBit(p.header[2], 7) }
-/*
-func queryHeadersModError(field string) error { return getHeadersModError(field, QUESTION) }
-func answerHeadersModError(field string) error { return getHeadersModError(field, ANSWER) }
-func getHeadersModError(field string, request int) error {
-    r := "query"
-    if request == ANSWER {
-        r = "answer"
-    }
-
-    return &HeadersModError{
-        err: fmt.Sprintf("%s missing input bytes", field),
-        request: r,
-    }
-}
-*/
+func (p *pskel) SetQuery() { p.header[2] |= (1<<QR) }
+func (p *pskel) SetAnswer() { p.header[2], _ = unsetBit(p.header[2], QR) }
 
 // opcode
 func (p *pskel) UnsetOpcode() { p.header[2], _ = unsetBit(p.header[2], 6, 5, 4, 3) }
 func (p *pskel) SetOpcode(i int) error {
     if i < QUERY || i > UPDATE {
-        j, _ := getBit(p.header[2], QR)
-
         return &HeadersModError{
             err: fmt.Sprintf("OPCODE set to invalid value(%d)", i),
-            request: j,
+            request: p.getRequestType(),
         }
     }
 
@@ -249,15 +117,40 @@ func (p *pskel) SetOpcode(i int) error {
     return nil
 }
 
+// aa
+func (p *pskel) UnsetAa() { p.header[2], _ = unsetBit(p.header[2], AA) }
+func (p *pskel) SetAa() {
+    // answer only (auth answer)
+    if p.getRequestType() == QUERY {
+        return
+    }
+
+    p.header[2] |= (1<<AA)
+}
+
+// rd
+func (p *pskel) UnsetRd() { p.header[2], _ = unsetBit(p.header[2], RD) }
+func (p *pskel) SetRd() { p.header[2] |= (1<<RD) }
+
+// ra
+func (p *pskel) UnsetRa() { p.header[3], _ = unsetBit(p.header[3], RA) }
+func (p *pskel) SetRa() { p.header[3] |= (1<<RA) }
+
+// ad (DNSSEC related and which is TODO)
+func (p *pskel) UnsetAd() { p.header[3], _ = unsetBit(p.header[3], AD) }
+func (p *pskel) SetAd() { p.header[3] |= (1<<AD) }
+
+// cd (DNSSEC related and which is TODO)
+func (p *pskel) UnsetCd() { p.header[3], _ = unsetBit(p.header[3], CD) }
+func (p *pskel) SetCd() { p.header[3] |= (1<<CD) }
+
 // rcode
 func (p *pskel) UnsetRcode() { p.header[3], _ = unsetBit(p.header[3], 3, 2, 1, 0) }
 func (p *pskel) SetRcode(i int) error {
     if i < NOERR || i > NOTZONE {
-        j, _ := getBit(p.header[2], QR)
-
         return &HeadersModError{
             err: fmt.Sprintf("RCODE set to invalid value(%d)", i),
-            request: j,
+            request: p.getRequestType(),
         }
     }
 
@@ -272,18 +165,70 @@ func (p *pskel) SetNxDomain() { p.SetRcode(NXDOMAIN) }
 func (p *pskel) SetNotImp() { p.SetRcode(NOTIMP) }
 func (p *pskel) SetRefused() { p.SetRcode(REFUSED) }
 
+// QD count - num of entries in question section
+func (p *pskel) GetQdcount() int { return makeUint(p.header[4:6]) }
+func (p *pskel) SetQdcount(i int) error { return p.setHeadersCounts(i, QDCOUNT) }
+// AN count - num or RRs in answer section
+func (p *pskel) GetAncount() int { return makeUint(p.header[6:8]) }
+func (p *pskel) SetAncount(i int) error { return p.setHeadersCounts(i, ANCOUNT) }
+// NS count - num of name server RRs in authority section
+func (p *pskel) GetNscount() int { return makeUint(p.header[8:10]) }
+func (p *pskel) SetNscount(i int) error { return p.setHeadersCounts(i, NSCOUNT) }
+// AR count - num of RRs in additional section
+func (p *pskel) GetArcount() int { return makeUint(p.header[10:12]) }
+func (p *pskel) SetArcount(i int) error { return p.setHeadersCounts(i, ARCOUNT) }
+
+func (p *pskel) setHeadersCounts(i, t int) error {
+    var from, to int
+    var cnt string
+    switch t {
+        case QDCOUNT:
+        from, to = 4, 6
+        cnt = "QDCOUNT"
+        case ANCOUNT:
+        from, to = 6, 8
+        cnt = "ANCOUNT"
+        case NSCOUNT:
+        from, to = 8, 10
+        cnt = "NSCOUNT"
+        case ARCOUNT:
+        from, to = 10, 12
+        cnt = "ARCOUNT"
+        default:
+        return &HeadersModError{
+            err: fmt.Sprintf("Unknown headers count type: %d", t),
+            request: p.getRequestType(),
+        }
+    }
+
+    if i < 1 || i > 100 {
+        return &HeadersModError{
+            err: fmt.Sprintf("%s set to invalid value(%d), supported max(100)", cnt, i),
+            request: p.getRequestType(),
+        }
+    }
+
+    // unset
+    for count:=from; count<to; count++ {
+        p.header[count] = uint8(0)
+    }
+    // set assigns to the upper byte
+    p.header[from+1] |= uint8(i)
+    return nil
+}
+
 func PacketAutopsy(p packet) (*pskel, error) {
     d := p.Data()
     fmt.Printf("ALL: %d\n\n", d)
 
     // header
-    skel := &pskel{header: d[:QUESTION_LABEL]}
+    skel := &pskel{header: d[:QUESTION_LABEL_START]}
 
     // question
-    for count:=QUESTION_LABEL; count<len(d); count++ {
+    for count:=QUESTION_LABEL_START; count<len(d); count++ {
         if d[count] == 0 {
             // end of question followed by 2+2 bytes of type, class
-            skel.question = d[QUESTION_LABEL:count+5]
+            skel.question = d[QUESTION_LABEL_START:count+5]
             break
         }
     }
@@ -377,22 +322,6 @@ func makeUint(b []byte) int {
 
     return i
 }
-
-/*
-func queryHeadersModError(field string) error { return getHeadersModError(field, QUESTION) }
-func answerHeadersModError(field string) error { return getHeadersModError(field, ANSWER) }
-func getHeadersModError(field string, request int) error {
-    r := "query"
-    if request == ANSWER {
-        r = "answer"
-    }
-
-    return &HeadersModError{
-        err: fmt.Sprintf("%s missing input bytes", field),
-        request: r,
-    }
-}
-*/
 
 func packetFactory(ch chan []byte) chan []byte {
     go func() {
