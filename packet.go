@@ -3,6 +3,7 @@ package main
 import (
     "net"
     "fmt"
+    "strings"
 )
 
 type packet interface {
@@ -86,13 +87,68 @@ func (p *pskel) GetQuestion() string {
 }
 
 func (p *pskel) SetQuestion(q string) error {
+    // get TYPE, CLASS from existing
+    tc := p.question[len(p.question)-4:]
+    return p.SetQuestionFull(q, makeUint(tc[:2]), makeUint(tc[2:4]))
+}
+
+func (p *pskel) SetQuestionFull(q string, ttype, class int) error {
     if len(q) == 0 {
         return &LabelModError{
             err: "Label cannot be zero length",
             request: p.getRequestType(),
         }
     }
-    // TODO TODO TODO
+
+    if ttype < 1 || ttype > TXT {
+        return &LabelModError{
+            err: fmt.Sprintf("Unknown TYPE(%d)", ttype),
+            request: p.getRequestType(),
+        }
+    }
+
+    if class < 1 || class > HS {
+        return &LabelModError{
+            err: fmt.Sprintf("Unknown CLASS(%d)", class),
+            request: p.getRequestType(),
+        }
+    }
+
+    xtra := 1   // byte for initial length
+    xtra++      // byte for label end(0)
+    xtra += 2   // 2 bytes TYPE
+    xtra += 2   // 2 bytes CLASS
+    b := make([]byte, len(q)+xtra)
+
+    count := 0
+    for _, part := range strings.Split(q, ".") {
+        bytes := []byte(part)
+
+        b[count] = byte(len(bytes))
+        count++
+
+        for i:=0; i<len(bytes); i++ {
+            b[count] = bytes[i]
+            count++
+        }
+    }
+
+    fmt.Printf("SetQuestion(): %+v\n", p.question)
+    fmt.Printf("SetQuestion(): %+v\n", b)
+
+    b[count] = 0 // end of label
+    count++
+    b[count] = 0 // type
+    count++
+    b[count] = byte(ttype)
+    count++
+    b[count] = 0
+    count++
+    b[count] = byte(class)
+
+    // append TYPE, CLASS (2 bytes each)
+    fmt.Printf("SetQuestion(): %+v\n", b)
+    return nil
 }
 
 //
