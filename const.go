@@ -178,17 +178,6 @@ func getType(i int) string {
         case MX:    return "MX"
         case TXT:   return "TXT"
     }
-    /*
-    switch ; {
-        case i == A:    return "A"
-        case i == NS:   return "NS"
-        case i == CNAME:return "CNAME"
-        case i == SOA:  return "SOA"
-        case i == PTR:  return "PTR"
-        case i == MX:   return "MX"
-        case i == TXT:  return "TXT"
-    }
-    */
 
     return "OTHER_T"
 }
@@ -202,9 +191,9 @@ const (
 )
 
 func getClass(i int) string {
-    switch ; {
-        case i == IN: return "IN"
-        case i == CH: return "CH"
+    switch i {
+        case IN: return "IN"
+        case CH: return "CH"
     }
 
     return "OTHER_C"
