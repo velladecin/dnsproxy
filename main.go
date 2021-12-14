@@ -11,7 +11,6 @@ func main() {
     }
 
     dx.QueryHandler(func(q *Query){
-        //q.Label()
         skel, err := PacketAutopsy(q)
         if err != nil {
             panic(err.Error())
@@ -24,10 +23,14 @@ func main() {
 
         question := skel.GetQuestion()
         fmt.Println(question)
+        err = skel.SetQuestion("decin.cz")
+        if err != nil {
+            panic(err)
+        }
+        fmt.Println("--------->>> QQQQ END")
     })
 
     dx.AnswerHandler(func(q *Query, a *Answer){
-        //q.Label() // <<-- this works
         fmt.Println()
         fmt.Println()
         skel, err := PacketAutopsy(a)
