@@ -20,7 +20,11 @@ package main
     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 */
 
-// Flags byte[2]
+// Flags byte[2,3]
+const (
+    Flags1 = iota + 2
+    Flags2
+)
 const (
     RD = iota
     TC
@@ -41,67 +45,6 @@ const (
     NOTIFY
     UPDATE
 )
-
-// The below relates to the QR bit and has got nothing to do with OPCODE.
-// But QR is 0 for query and 1 for answer so we're piggybacking on it here..
-func getRequestString(i int) string {
-    if i == QUERY {
-        return "QUERY"
-    }
-
-    return "ANSWER"
-}
-
-
-// Flags byte[3]
-const (
-    _ = iota // rcode start
-    _
-    _
-    _        // rcode end
-    CD
-    AD
-    Z
-    RA
-)
-
-// RCODE
-const (
-    NOERR = iota
-    FORMERR
-    SERVFAIL
-    NXDOMAIN
-    NOTIMP
-    REFUSED
-    _
-    _
-    _
-    NOTAUTH
-    NOTZONE
-)
-
-//
-// Counts
-const (
-    QDCOUNT = iota
-    ANCOUNT
-    NSCOUNT
-    ARCOUNT
-)
-func getHeadersCount(i int) (string, error) {
-    switch i {
-        case QDCOUNT: return "QDCOUNT", nil
-        case ANCOUNT: return "ANCOUNT", nil
-        case NSCOUNT: return "NSCOUNT", nil
-        case ARCOUNT: return "ARCOUNT", nil
-    }
-
-    return "", &HeadersUnknownFieldError{
-        err: "Unknown headers count requested",
-        val: i,
-    }
-}
-
 
 /*
     Labels:
@@ -147,54 +90,3 @@ const (
     COMPRESSED_LABEL = 192  // 11000000
     LABEL_END = 41
 )
-
-// QTYPE, RR Type
-const (
-    A = iota + 1
-    NS
-    MD          // obsolete use MX (mail destination)
-    MF          // obsolete use MX (mail forwarder)
-    CNAME
-    SOA
-    MB          // experimental (mail box)
-    MG          // experimental (mail group member)
-    MR          // experimental (mail rename domain name)
-    NULL        // experimental
-    WKS         // well known service description
-    PTR
-    HINFO       // host info
-    MINFO       // mailbox info
-    MX
-    TXT
-)
-
-func getType(i int) string {
-    switch i {
-        case A:     return "A"
-        case NS:    return "NS"
-        case CNAME: return "CNAME"
-        case SOA:   return "SOA"
-        case PTR:   return "PTR"
-        case MX:    return "MX"
-        case TXT:   return "TXT"
-    }
-
-    return "OTHER_T"
-}
-
-// QCLASS, RR Class
-const (
-    IN = iota + 1
-    CS          // obsolete
-    CH          // chaos
-    HS          // hesiod
-)
-
-func getClass(i int) string {
-    switch i {
-        case IN: return "IN"
-        case CH: return "CH"
-    }
-
-    return "OTHER_C"
-}

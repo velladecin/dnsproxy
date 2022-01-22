@@ -3,7 +3,7 @@ package main
 import (
     "fmt"
     "net"
-    "sync"
+_    "sync"
 )
 
 const (
@@ -27,18 +27,22 @@ const (
 
 type DnsProxy struct {
     // local DNS listener
-    Local net.PacketConn
+    //Local net.PacketConn
+    Listener net.PacketConn
 
     // stream of (new) connections to upstream DNS
-    Remote <-chan net.Conn
+    //Remote <-chan net.Conn
+    upstreamConn <-chan net.Conn
 
     // stream of (empty) packets
-    Packet <-chan []byte
+    emptyPacket <-chan []byte
 
-    // user defined handlers
-    queryHandler func(*Query)
-    answerHandler func(*Query, *Answer) // TODO this is already modified Query
-                                        // will we also need the original?
+    // handlers
+    // Question handler accepts *Pskel (question) as argument and may return *Pskel (its own answer).
+    // If return is nil question will be passed up to the default upstream to be answered.
+    // Setting answerHandler while returning answer from questionHandler will have no effect on the answer.
+    questionHandler func(*Pskel) *Pskel // question
+    answerHandler func(*Pskel)          // answer
 }
 
 func NewDnsProxy(remote ...string) (*DnsProxy, error) {
@@ -53,34 +57,17 @@ func NewDnsProxy(remote ...string) (*DnsProxy, error) {
         remote = fmtDnsNetPoint(remote1, remote2)
     }
 
-    dx.Local = conn
-    dx.Remote = upstreamFactory(make(chan net.Conn, factoryQsize), remote)
-    dx.Packet = packetFactory(make(chan []byte, factoryQsize))
+    dx.Listener = conn
+    dx.upstreamConn = upstreamFactory(make(chan net.Conn, factoryQsize), remote)
+    dx.emptyPacket = packetFactory(make(chan []byte, factoryQsize))
 
     return &dx, nil
 }
 
-// QueryHandler is defined by user
-// handleQuery is run by proxy query receiver
-func (dx *DnsProxy) QueryHandler(fn func(*Query)) { dx.queryHandler = fn }
-func (dx *DnsProxy) handleQuery(r *Query) {
-    if dx.queryHandler == nil {
-        return
-    }
+func (dx *DnsProxy) QuestionHandler(h func(*Pskel) *Pskel) { dx.questionHandler = h }
+func (dx *DnsProxy) AnswerHandler(h func(*Pskel)) { dx.answerHandler = h }
 
-    dx.queryHandler(r)
-}
-
-// AnswerHandler is defined by user
-// handleAnswer is run by proxy answer receiver
-func (dx *DnsProxy) AnswerHandler(fn func(*Query, *Answer)) { dx.answerHandler = fn }
-func (dx *DnsProxy) handleAnswer(q *Query, a *Answer) {
-    if dx.answerHandler == nil {
-        return
-    }
-
-    dx.answerHandler(q, a)
-}
+/*
 
 func (dx *DnsProxy) proxy(query *Query) {
     // handle query here
@@ -122,20 +109,79 @@ func (dx *DnsProxy) proxy(query *Query) {
         panic(err)
     }
 }
+*/
+
+func (dx *DnsProxy) proxy_new(query []byte, client net.Addr) {
+    qskel, err := NewPacketSkeleton(query)
+    if err != nil {
+        panic(err)
+    }
+    //fmt.Printf("Q: %+v\n", qskel)
+
+    var askel *Pskel
+    if dx.questionHandler != nil {
+        askel = dx.questionHandler(qskel)
+    }
+
+    if askel == nil {
+        upstream := <-dx.upstreamConn
+        defer upstream.Close()
+
+        // Upstream write question
+        _, err = upstream.Write(query) // TODO will this be from query/skell, possibly after mod?
+        if err != nil {
+            panic(err)
+        }
+
+        // Upstream receive answer
+        p := <-dx.emptyPacket
+        _, err = upstream.Read(p)
+        if err != nil {
+            panic(err)
+        }
+
+        askel, err = NewPacketSkeleton(p)
+        if err != nil {
+            panic(err)
+        }
+        //fmt.Printf("A: %+v\n", askel)
+
+        if dx.answerHandler != nil {
+            dx.answerHandler(askel)
+        }
+    }
+
+    // Downstream write (back) answer
+    _, err = dx.Listener.WriteTo(askel.Bytes(), client) // TODO will this be from answer/skell, possibly after mod?
+    if err != nil {
+        panic(err)
+    }
+}
 
 func (dx *DnsProxy) Accept() {
     for {
-        // question receiver
-        query := <-dx.Packet
-        _, addr, err := dx.Local.ReadFrom(query) // blocking
+        // query receiver
+        query := <-dx.emptyPacket
+        _, addr, err := dx.Listener.ReadFrom(query) // blocking
         if err != nil {
             // TODO log error here and move on?
             panic(err)
         }
 
         // offload to free the receiver
-        go dx.proxy(NewQuery(query, addr))
+        go dx.proxy_new(query, addr)
     }
+}
+
+func packetFactory(ch chan []byte) chan []byte {
+    go func() {
+        for {
+            p := make([]byte, 512)
+            ch <- p
+        }
+    }()
+
+    return ch
 }
 
 func upstreamFactory(ch chan net.Conn, remote []string) chan net.Conn {
