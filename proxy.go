@@ -4,6 +4,7 @@ import (
     "fmt"
     "net"
 _    "sync"
+    "regexp"
 )
 
 const (
@@ -12,18 +13,13 @@ const (
     port = 53
 
     // proxy
-    local = "127.0.0.1"
-    remote1 = "8.8.8.8"
-    remote2 = "8.8.4.4"
+    upstream1 = "8.8.8.8"
+    upstream2 = "8.8.4.4"
 
     // pre-prepared queue size
     // for upstream/remote connections and empty packets
     factoryQsize = 3
 )
-
-// Proxy
-// local peer is always this server
-// remote peers are N+1 servers
 
 type DnsProxy struct {
     // local DNS listener
@@ -45,20 +41,21 @@ type DnsProxy struct {
     answerHandler func(*Pskel)          // answer
 }
 
-func NewDnsProxy(remote ...string) (*DnsProxy, error) {
+func NewDnsProxy(upstream ...string) (*DnsProxy, error) {
     var dx DnsProxy
 
-    conn, err := net.ListenPacket(network, fmtDnsNetPoint(local)[0])
+    // TODO listen on public IP(s?)
+    conn, err := net.ListenPacket(network, fmtDnsNetPoint("127.0.0.1")[0])
     if err != nil {
         return &dx, err
     }
 
-    if len(remote) == 0 {
-        remote = fmtDnsNetPoint(remote1, remote2)
+    if len(upstream) == 0 {
+        upstream = []string{upstream1, upstream2}
     }
 
     dx.Listener = conn
-    dx.upstreamConn = upstreamFactory(make(chan net.Conn, factoryQsize), remote)
+    dx.upstreamConn = upstreamFactory(make(chan net.Conn, factoryQsize), fmtDnsNetPoint(upstream...))
     dx.emptyPacket = packetFactory(make(chan []byte, factoryQsize))
 
     return &dx, nil
@@ -67,56 +64,11 @@ func NewDnsProxy(remote ...string) (*DnsProxy, error) {
 func (dx *DnsProxy) QuestionHandler(h func(*Pskel) *Pskel) { dx.questionHandler = h }
 func (dx *DnsProxy) AnswerHandler(h func(*Pskel)) { dx.answerHandler = h }
 
-/*
-
-func (dx *DnsProxy) proxy(query *Query) {
-    // handle query here
-    var wg sync.WaitGroup
-    wg.Add(1)
-
-    go func(wg *sync.WaitGroup) {
-        defer wg.Done()
-        dx.handleQuery(query)
-    }(&wg)
-
-    upstream := <-dx.Remote
-    defer upstream.Close()
-
-    wg.Wait()
-
-    // Upstream / Remote
-    // write
-    _, err := upstream.Write(query.bytes)
-    if err != nil {
-        panic(err)
-    }
-
-    // receive
-    p := <-dx.Packet
-    _, err = upstream.Read(p)
-    if err != nil {
-        panic(err)
-    }
-
-    // handle answer here
-    answer := NewAnswer(p)
-    dx.handleAnswer(query, answer)
-
-    // Downstream / Local
-    // write
-    _, err = dx.Local.WriteTo(answer.bytes, query.conn)
-    if err != nil {
-        panic(err)
-    }
-}
-*/
-
 func (dx *DnsProxy) proxy_new(query []byte, client net.Addr) {
     qskel, err := NewPacketSkeleton(query)
     if err != nil {
         panic(err)
     }
-    //fmt.Printf("Q: %+v\n", qskel)
 
     var askel *Pskel
     if dx.questionHandler != nil {
@@ -128,7 +80,7 @@ func (dx *DnsProxy) proxy_new(query []byte, client net.Addr) {
         defer upstream.Close()
 
         // Upstream write question
-        _, err = upstream.Write(query) // TODO will this be from query/skell, possibly after mod?
+        _, err = upstream.Write(qskel.Bytes())
         if err != nil {
             panic(err)
         }
@@ -144,7 +96,6 @@ func (dx *DnsProxy) proxy_new(query []byte, client net.Addr) {
         if err != nil {
             panic(err)
         }
-        //fmt.Printf("A: %+v\n", askel)
 
         if dx.answerHandler != nil {
             dx.answerHandler(askel)
@@ -152,7 +103,7 @@ func (dx *DnsProxy) proxy_new(query []byte, client net.Addr) {
     }
 
     // Downstream write (back) answer
-    _, err = dx.Listener.WriteTo(askel.Bytes(), client) // TODO will this be from answer/skell, possibly after mod?
+    _, err = dx.Listener.WriteTo(askel.Bytes(), client)
     if err != nil {
         panic(err)
     }
@@ -220,7 +171,15 @@ func upstreamFactory(ch chan net.Conn, remote []string) chan net.Conn {
 func fmtDnsNetPoint(s ...string) []string {
     var dnp []string
     for _, val := range s {
-        dnp = append(dnp, fmt.Sprintf("%s:%d", val, port))
+        if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+\.\d+(\:\d+)?$`, val); !ok {
+            panic("Invalid net definition: " + val)
+        }
+
+        if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+\.\d+\:\d+$`, val); !ok {
+            val = fmt.Sprintf("%s:%d", val, port)
+        }
+
+        dnp = append(dnp, val)
     }
 
     return dnp
