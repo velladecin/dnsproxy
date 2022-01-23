@@ -1,7 +1,6 @@
 package main
 
 import (
-_    "net"
     "fmt"
 )
 
@@ -11,24 +10,6 @@ type packet []byte
 type Pskel struct {
     header, question, footer []byte
     rr [][]byte
-}
-
-func (p *Pskel) Type() int {
-    i, _ := getBit(p.header[Flags2], QR) 
-    return i
-}
-
-func (p *Pskel) Bytes() []byte {
-    var b []byte 
-    b = append(b, p.header...)
-    b = append(b, p.question...)
-
-    for _, r := range p.rr {
-        b = append(b, r...)
-    }
-
-    b = append(b, p.footer...)
-    return b
 }
 
 func NewPacketSkeleton(p packet) (*Pskel, error) {
@@ -81,6 +62,51 @@ func NewPacketSkeleton(p packet) (*Pskel, error) {
     return skel, nil
 }
 
+func (p *Pskel) Type() int {
+    i, _ := getBit(p.header[Flags2], QR)
+    return i
+}
+
+func (p *Pskel) TypeString() string {
+    if p.Type() == QUERY {
+        return "QUERY"
+    }
+
+    return "ANSWER"
+}
+
+func (p *Pskel) Bytes() []byte {
+    var b []byte
+    b = append(b, p.header...)
+    b = append(b, p.question...)
+
+    for _, r := range p.rr {
+        b = append(b, r...)
+    }
+
+    b = append(b, p.footer...)
+    return b
+}
+
+// Flags - byte 1
+
+func (p *Pskel) SetQuery()  { p.header[Flags1] |= (1<<QR) }
+func (p *Pskel) SetAnswer() { p.header[Flags1], _ = unsetBit(p.header[Flags1], QR) }
+
+func (p *Pskel) SetOpcode(i int) error {
+    if i < QUERY || i > UPDATE {
+        return fmt.Errorf("Attempt to set OPCODE to invalid value: %d", i)
+    }
+
+    p.header[Flags1], _ = unsetBit(p.header[Flags1], 6, 5, 4, 3)
+    p.header[Flags1] |= uint8(i)
+    return nil
+}
+
+// Flags - byte 2
+
+// Helper functions
+
 func makeUint(b []byte) int {
     var i int
     switch len(b) {
@@ -94,9 +120,40 @@ func makeUint(b []byte) int {
     return i
 }
 
+func unsetBit(b byte, pos ...int) (byte, error) {
+    if len(pos) < 1 || len(pos) > 8 {
+        return b, fmt.Errorf("8 bits in byte, got: %d", len(pos))
+    }
+
+    original := b
+    for _, p := range pos {
+        if err := validBitPos(p); err != nil {
+            return original, err
+        }
+
+        b |= (1<<p) // set
+        b ^= (1<<p) // xor
+    }
+
+    return b, nil
+}
+
+func isBitSet(b byte, pos int) (bool, error) {
+    set, err := getBit(b, pos)
+    if err != nil {
+        return false, err
+    }
+
+    if set == 1 {
+        return true, nil
+    }
+
+    return false, nil
+}
+
 func getBit(b byte, pos int) (int, error) {
-    if pos < 0 || pos > 7 {
-        return -1, fmt.Errorf("0-7 bit indexes in byte, got: %d", pos)
+    if err := validBitPos(pos); err != nil {
+        return -1, err
     }
 
     if (b & (1<<pos)) == 0 {
@@ -104,4 +161,12 @@ func getBit(b byte, pos int) (int, error) {
     }
 
     return 1, nil
+}
+
+func validBitPos(pos int) error {
+    if pos < 0 || pos > 7 {
+        return fmt.Errorf("0-7 bit indices in byte, got: %d", pos)
+    }
+
+    return nil
 }
