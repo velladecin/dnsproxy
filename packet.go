@@ -35,6 +35,7 @@ func NewPacketSkeleton(p packet) (*Pskel, error) {
 
     // answer (RRs)
     // L1                  TTL CLASS     TYPE   L2
+    // -------------------------------------------------------
     // c1.domain.com.		10	  IN	CNAME	c2.domain.com.
     // c2.domain.com.       10    IN        A   1.1.1.1
 
@@ -43,7 +44,7 @@ func NewPacketSkeleton(p packet) (*Pskel, error) {
         // 2 bytes of TYPE, 2 bytes of CLASS, 4 bytes of TTL
         // 2 bytes of total length of L2
         if p[i] == 0 {
-            // verify end
+            // verify end, 2 zero bytes
             if (p[i] | p[i+1]) == 0 {
                 skel.footer = p[i:]
                 break
@@ -88,24 +89,121 @@ func (p *Pskel) Bytes() []byte {
     return b
 }
 
+// #############
+// ## Headers ##
+// #############
+
 // Flags - byte 1
-
-func (p *Pskel) SetQuery()  { p.header[Flags1] |= (1<<QR) }
-func (p *Pskel) SetAnswer() { p.header[Flags1], _ = unsetBit(p.header[Flags1], QR) }
-
+// QR
+func (p *Pskel) SetQuery() { p.header[Flags1], _ = unsetBit(p.header[Flags1], QR) }
+func (p *Pskel) SetAnswer()  { p.header[Flags1] |= (1<<QR) }
+// OPCODE
 func (p *Pskel) SetOpcode(i int) error {
     if i < QUERY || i > UPDATE {
-        return fmt.Errorf("Attempt to set OPCODE to invalid value: %d", i)
+        return fmt.Errorf("OPCODE value not supported: %d", i)
     }
 
     p.header[Flags1], _ = unsetBit(p.header[Flags1], 6, 5, 4, 3)
     p.header[Flags1] |= uint8(i)
     return nil
 }
+func (p *Pskel) SetOpcodeQuery() error { return p.SetOpcode(QUERY) } // 99% of requests will be for DNS resolution (OPCODE query)
+// AA
+func (p *Pskel) SetAaTrue() {p.header[Flags1] |= (1<<AA)}
+func (p *Pskel) SetAaFalse() {p.header[Flags1], _ = unsetBit(p.header[Flags1], AA)}
+// TC
+func (p *Pskel) SetTcTrue() {p.header[Flags1] |= (1<<TC)}
+func (p *Pskel) SetTcFalse() {p.header[Flags1], _ = unsetBit(p.header[Flags1], TC)}
+// RD
+func (p *Pskel) SetRdTrue() {p.header[Flags1] |= (1<<RD)}
+func (p *Pskel) SetRdFalse() {p.header[Flags1], _ = unsetBit(p.header[Flags1], RD)}
 
 // Flags - byte 2
+// RA
+func (p *Pskel) SetRaTrue() { p.header[Flags2] |= (1<<RA) }
+func (p *Pskel) SetRaFalse() { p.header[Flags2], _ = unsetBit(p.header[Flags1], RA)}
+// RCODE
+func (p *Pskel) SetRcode(i int) error {
+    if i < NOERROR || i > NAME_NOT_IN_ZONE {
+        return fmt.Errorf("RCODE value not supported: %d", i)
+    }
+
+    p.header[Flags2], _ = unsetBit(p.header[Flags2], 3, 2, 1, 0)
+    p.header[Flags2] |= uint8(i)
+    return nil
+}
+func (p *Pskel) SetRcodeNoErr() error { return p.SetRcode(NOERROR) }
+func (p *Pskel) SetRcodeFmtErr() error { return p.SetRcode(FORMATERROR) }
+func (p *Pskel) SetRcodeServFail() error { return p.SetRcode(SERVFAIL) }
+func (p *Pskel) SetRcodeNotImpl() error { return p.SetRcode(NOTIMPLEMENTED) }
+func (p *Pskel) SetRcodeRefused() error { return p.SetRcode(REFUSED) }
+func (p *Pskel) SetRcodeNoAuth() error { return p.SetRcode(NOAUTH) }
+func (p *Pskel) SetRcodeNotInZone() error { return p.SetRcode(NAME_NOT_IN_ZONE) }
+
+// Header counts
+func (p *Pskel) SetHeaderCount(pos, i int) error {
+    if pos < QDcount1 || pos > ARcount2 {
+        return fmt.Errorf("Invalid header count byte position: %d", pos)
+    }
+
+    p.header[pos] = byte(i)
+    return nil
+}
+
+// QDcount
+func (p *Pskel) SetQDcount(i int) error {
+    if err := validHeaderCount(i); err != nil {
+        return err
+    }
+
+    p.SetHeaderCount(QDcount1, 0)
+    p.SetHeaderCount(QDcount2, i)
+    return nil
+}
+
+// ANcount
+func (p *Pskel) SetANcount(i int) error {
+    if err := validHeaderCount(i); err != nil {
+        return err
+    }
+
+    p.SetHeaderCount(ANcount1, 0)
+    p.SetHeaderCount(ANcount2, i)
+    return nil
+}
+
+// NScount
+func (p *Pskel) SetNScount(i int) error {
+    if err := validHeaderCount(i); err != nil {
+        return err
+    }
+
+    p.SetHeaderCount(NScount1, 0)
+    p.SetHeaderCount(NScount2, i)
+    return nil
+}
+
+// ARcount
+func (p *Pskel) SetARcount(i int) error {
+    if err := validHeaderCount(i); err != nil {
+        return err
+    }
+
+    p.SetHeaderCount(ARcount1, 0)
+    p.SetHeaderCount(ARcount2, i)
+    return nil
+}
+
 
 // Helper functions
+
+func validHeaderCount(i int) error {
+    if i < 0 || i > 100 {
+        return fmt.Errorf("Unsupported header count value: %d", i)
+    }
+
+    return nil
+}
 
 func makeUint(b []byte) int {
     var i int
@@ -120,6 +218,8 @@ func makeUint(b []byte) int {
     return i
 }
 
+// Max 8 values allowed in []pos (8 bits per byte)
+// Each values must be between 0-7 (bit index 0 - 7 within the byte)
 func unsetBit(b byte, pos ...int) (byte, error) {
     if len(pos) < 1 || len(pos) > 8 {
         return b, fmt.Errorf("8 bits in byte, got: %d", len(pos))
