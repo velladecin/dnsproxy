@@ -39,11 +39,48 @@ const (
 // OPCODE
 const (
     QUERY = iota
-    IQUERY      // obsolete rfc6895
+    IQUERY              // obsolete rfc6895, 2.2. OpCode Assignment
     STATUS
-    _
+    UNASSIGNED_OPCODE
     NOTIFY
     UPDATE
+)
+
+const (
+    _ = iota // rcode start
+    _
+    _
+    _        // rcode end
+    CD
+    AD
+    Z
+    RA
+)
+
+// RCODE
+const (
+    NOERROR = iota
+    FORMATERROR
+    SERVFAIL
+    NXDOMAIN
+    NOTIMPLEMENTED  // query type not implemented/supported
+    REFUSED
+    NAME_EXIST_BUT_SHOULDNOT
+    RRSET_EXIST_BUT_SHOULDNOT
+    RR_NOEXIST_BUT_SHOULD
+    NOAUTH
+    NAME_NOT_IN_ZONE
+)
+
+const (
+    QDcount1 = iota + 4
+    QDcount2
+    ANcount1
+    ANcount2
+    NScount1
+    NScount2
+    ARcount1
+    ARcount2
 )
 
 /*
