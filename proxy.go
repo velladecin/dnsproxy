@@ -12,7 +12,7 @@ const (
     network = "udp4"
     port = 53
 
-    // proxy
+    // default upstream
     upstream1 = "8.8.8.8"
     upstream2 = "8.8.4.4"
 
@@ -55,8 +55,8 @@ func NewDnsProxy(upstream ...string) (*DnsProxy, error) {
     }
 
     dx.Listener = conn
-    dx.upstreamConn = upstreamFactory(make(chan net.Conn, factoryQsize), fmtDnsNetPoint(upstream...))
-    dx.emptyPacket = packetFactory(make(chan []byte, factoryQsize))
+    dx.upstreamConn = upstreamFactory(fmtDnsNetPoint(upstream...))
+    dx.emptyPacket = packetFactory()
 
     return &dx, nil
 }
@@ -124,7 +124,8 @@ func (dx *DnsProxy) Accept() {
     }
 }
 
-func packetFactory(ch chan []byte) chan []byte {
+func packetFactory() chan []byte {
+    ch := make(chan []byte, factoryQsize)
     go func() {
         for {
             p := make([]byte, 512)
@@ -135,7 +136,8 @@ func packetFactory(ch chan []byte) chan []byte {
     return ch
 }
 
-func upstreamFactory(ch chan net.Conn, remote []string) chan net.Conn {
+func upstreamFactory(remote []string) chan net.Conn {
+    ch := make(chan net.Conn, factoryQsize)
     go func() {
         errMax := 3
         errCount := 0
@@ -169,6 +171,22 @@ func upstreamFactory(ch chan net.Conn, remote []string) chan net.Conn {
 }
 
 func fmtDnsNetPoint(s ...string) []string {
+    dnp := make([]string, len(s))
+    for i, val := range s {
+        if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+\.\d+(\:\d+)?$`, val); !ok {
+            panic("Invalid net definition: " + val)
+        }
+
+        if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+\.\d+\:\d+$`, val); !ok {
+            val = fmt.Sprintf("%s:%d", val, port)
+        }
+
+        dnp[i] = val
+    }
+
+    return dnp
+
+    /* ORIGINAL
     var dnp []string
     for _, val := range s {
         if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+\.\d+(\:\d+)?$`, val); !ok {
@@ -183,4 +201,5 @@ func fmtDnsNetPoint(s ...string) []string {
     }
 
     return dnp
+    */
 }
