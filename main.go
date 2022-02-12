@@ -12,6 +12,15 @@ func main() {
 
     dx.QuestionHandler(func(q *Pskel) *Pskel {
         fmt.Printf("Q: %+v\n", q)
+
+        if q.Question() == "cnn.com" {
+            fmt.Println("Setting to answer")
+            q.SetAnswer()
+            q.SetRaTrue()
+            q.SetRcodeNxdomain()
+            return q
+        }
+
         return nil
     })
 
