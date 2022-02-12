@@ -63,6 +63,27 @@ func NewPacketSkeleton(p packet) (*Pskel, error) {
     return skel, nil
 }
 
+func (p *Pskel) Question() string {
+    // ignore last 4 bytes of CLASS, TYPE
+    var question string
+    for i:=0; i<len(p.question); {
+        l := int(p.question[i])
+        if l == 0 {
+            break
+        }
+
+        i++
+        if question != "" {
+            question += "."
+        }
+
+        question += string(p.question[i:i+l])
+        i += l
+    }
+
+    return question
+}
+
 func (p *Pskel) Type() int {
     i, _ := getBit(p.header[Flags2], QR)
     return i
@@ -135,6 +156,8 @@ func (p *Pskel) SetRcode(i int) error {
 func (p *Pskel) SetRcodeNoErr() error { return p.SetRcode(NOERROR) }
 func (p *Pskel) SetRcodeFmtErr() error { return p.SetRcode(FORMATERROR) }
 func (p *Pskel) SetRcodeServFail() error { return p.SetRcode(SERVFAIL) }
+func (p *Pskel) SetRcodeNxdomain() error { return p.SetRcode(NXDOMAIN) }
+func (p *Pskel) SetNxdomain() error { return p.SetRcodeNxdomain() }
 func (p *Pskel) SetRcodeNotImpl() error { return p.SetRcode(NOTIMPLEMENTED) }
 func (p *Pskel) SetRcodeRefused() error { return p.SetRcode(REFUSED) }
 func (p *Pskel) SetRcodeNoAuth() error { return p.SetRcode(NOAUTH) }
