@@ -127,3 +127,30 @@ const (
     COMPRESSED_LABEL = 192  // 11000000
     LABEL_END = 41
 )
+
+// TYPE
+const (
+    A = iota + 1
+    NS
+    MD          // obsolete use MX (mail destination)
+    MF          // obsolete use MX (mail forwarder)
+    CNAME
+    SOA
+    MB          // experimental (mail box)
+    MG          // experimental (mail group member)
+    MR          // experimental (mail rename domain name)
+    NULL        // experimental
+    WKS         // well known service description
+    PTR
+    HINFO       // host info
+    MINFO       // mailbox info
+    MX
+    TXT
+)
+// CLASS
+const (
+    IN = iota + 1
+    CS          // obsolete
+    CH          // chaos
+    HS          // hesiod
+)
