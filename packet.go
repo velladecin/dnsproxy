@@ -64,11 +64,11 @@ func NewPacketSkeleton(p packet) (*Pskel, error) {
 }
 
 func (p *Pskel) Question() string {
-    // ignore last 4 bytes of CLASS, TYPE
     var question string
     for i:=0; i<len(p.question); {
         l := int(p.question[i])
         if l == 0 {
+            // ignore last 4 bytes of CLASS, TYPE
             break
         }
 
@@ -110,11 +110,12 @@ func (p *Pskel) Bytes() []byte {
     return b
 }
 
-// #############
-// ## Headers ##
-// #############
+// ##################
+// ## Headers Mods ##
+// ##################
 
-// Flags - byte 1
+// ##
+// ## Flags - byte 1
 // QR
 func (p *Pskel) SetQuery() { p.header[Flags1], _ = unsetBit(p.header[Flags1], QR) }
 func (p *Pskel) SetAnswer()  { p.header[Flags1] |= (1<<QR) }
@@ -139,10 +140,14 @@ func (p *Pskel) SetTcFalse() {p.header[Flags1], _ = unsetBit(p.header[Flags1], T
 func (p *Pskel) SetRdTrue() {p.header[Flags1] |= (1<<RD)}
 func (p *Pskel) SetRdFalse() {p.header[Flags1], _ = unsetBit(p.header[Flags1], RD)}
 
-// Flags - byte 2
+// ##
+// ## Flags - byte 2
 // RA
 func (p *Pskel) SetRaTrue() { p.header[Flags2] |= (1<<RA) }
-func (p *Pskel) SetRaFalse() { p.header[Flags2], _ = unsetBit(p.header[Flags1], RA)}
+func (p *Pskel) SetRaFalse() { p.header[Flags2], _ = unsetBit(p.header[Flags2], RA)}
+// AD
+func (p *Pskel) SetAdTrue() { p.header[Flags2] |= (1<<AD) }
+func (p *Pskel) SetAdFalse() { p.header[Flags2], _ = unsetBit(p.header[Flags2], AD)}
 // RCODE
 func (p *Pskel) SetRcode(i int) error {
     if i < NOERROR || i > NAME_NOT_IN_ZONE {
@@ -157,13 +162,14 @@ func (p *Pskel) SetRcodeNoErr() error { return p.SetRcode(NOERROR) }
 func (p *Pskel) SetRcodeFmtErr() error { return p.SetRcode(FORMATERROR) }
 func (p *Pskel) SetRcodeServFail() error { return p.SetRcode(SERVFAIL) }
 func (p *Pskel) SetRcodeNxdomain() error { return p.SetRcode(NXDOMAIN) }
-func (p *Pskel) SetNxdomain() error { return p.SetRcodeNxdomain() }
+func (p *Pskel) SetNxDomain() error { return p.SetRcodeNxdomain() } // likely used often
 func (p *Pskel) SetRcodeNotImpl() error { return p.SetRcode(NOTIMPLEMENTED) }
 func (p *Pskel) SetRcodeRefused() error { return p.SetRcode(REFUSED) }
 func (p *Pskel) SetRcodeNoAuth() error { return p.SetRcode(NOAUTH) }
 func (p *Pskel) SetRcodeNotInZone() error { return p.SetRcode(NAME_NOT_IN_ZONE) }
 
-// Header counts
+// ##
+// ## Header counts
 func (p *Pskel) SetHeaderCount(pos, i int) error {
     if pos < QDcount1 || pos > ARcount2 {
         return fmt.Errorf("Invalid header count byte position: %d", pos)
@@ -172,7 +178,6 @@ func (p *Pskel) SetHeaderCount(pos, i int) error {
     p.header[pos] = byte(i)
     return nil
 }
-
 // QDcount
 func (p *Pskel) SetQDcount(i int) error {
     if err := validHeaderCount(i); err != nil {
@@ -183,7 +188,6 @@ func (p *Pskel) SetQDcount(i int) error {
     p.SetHeaderCount(QDcount2, i)
     return nil
 }
-
 // ANcount
 func (p *Pskel) SetANcount(i int) error {
     if err := validHeaderCount(i); err != nil {
@@ -194,7 +198,6 @@ func (p *Pskel) SetANcount(i int) error {
     p.SetHeaderCount(ANcount2, i)
     return nil
 }
-
 // NScount
 func (p *Pskel) SetNScount(i int) error {
     if err := validHeaderCount(i); err != nil {
@@ -205,7 +208,6 @@ func (p *Pskel) SetNScount(i int) error {
     p.SetHeaderCount(NScount2, i)
     return nil
 }
-
 // ARcount
 func (p *Pskel) SetARcount(i int) error {
     if err := validHeaderCount(i); err != nil {
@@ -217,8 +219,63 @@ func (p *Pskel) SetARcount(i int) error {
     return nil
 }
 
+// ##
+// ## Resource Records mods
+func (p *Pskel) SetRR(rr *Rr) {
+}
 
-// Helper functions
+// ###################
+// ## Resource Recs ##
+// ###################
+
+type RrMod func(*Rr)
+type Rr struct {
+    L1, L2 string
+    Ttype, Class, Ttl int
+}
+
+func NewRr(l1, l2 string, mods ...RrMod) *Rr {
+    rr := &Rr{l1, l2, A, IN, 218}
+    for _, m := range mods {
+        m(rr)
+    }
+
+    return rr
+}
+
+func RrTtl(ttl int) RrMod {
+    if ttl > 999 {
+        panic(fmt.Sprintf("Unsupported RR TTL value: %d", ttl))
+    }
+
+    return func(r *Rr) {
+        r.Ttl = ttl
+    }
+}
+func RrClass(class int) RrMod {
+    if class < IN || class > HS {
+        panic(fmt.Sprintf("Unsupported RR CLASS value: %d", class))
+    }
+
+    return func(r *Rr) {
+        r.Class = class
+    }
+}
+func RrType(ttype int) RrMod {
+    if ttype < A || ttype > TXT {
+        panic(fmt.Sprintf("Unsupported RR TYPE value: %d", ttype))
+    }
+
+    return func(r *Rr) {
+        r.Ttype = ttype
+    }
+}
+
+
+
+// ######################
+// ## Helper functions ##
+// ######################
 
 func validHeaderCount(i int) error {
     if i < 0 || i > 100 {
