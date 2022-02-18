@@ -17,7 +17,13 @@ func main() {
             fmt.Println("Setting to answer")
             q.SetAnswer()
             q.SetRaTrue()
-            q.SetRcodeNxdomain()
+            //q.SetRcodeNxdomain()
+            //q.SetRcodeNotImpl()
+            q.SetRcodeNoErr()
+            q.SetAdFalse()
+
+            fmt.Printf("%+v\n", q)
+            fmt.Printf("%b\n", q.header[3])
             return q
         }
 
