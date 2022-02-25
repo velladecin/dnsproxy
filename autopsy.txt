@@ -1,0 +1,136 @@
+/*
+    Some nice explanations in the below RFCs
+    https://datatracker.ietf.org/doc/html/rfc6895
+    https://datatracker.ietf.org/doc/html/rfc6891
+    https://datatracker.ietf.org/doc/html/rfc6840
+    https://datatracker.ietf.org/doc/html/rfc1035
+*/
+
+
+//
+// Headers
+
+                                   1  1  1  1  1  1
+     0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                      ID                       |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |QR|   OpCode  |AA|TC|RD|RA| Z|AD|CD|   RCODE   |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                QDCOUNT/ZOCOUNT                |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                ANCOUNT/PRCOUNT                |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                NSCOUNT/UPCOUNT                |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                    ARCOUNT                    |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+    // Qr - Type of Query
+    //   0 query
+    //   1 response
+
+    // Opcode - Kind of query
+    //   0 query
+    //   1 inverse query (obsolete)
+    //   2 status
+    //   3 unassigned
+    //   4 notify
+    //   5 update
+    //   6-15 future use
+
+    // Aa - Authoritative Answer
+    //   only used in response
+
+    // Tc - Truncation
+
+    // Rd - Recursion desired
+    //   expected to be copied from query to response
+
+    // Ra - Recursion available
+    //   only used in response
+
+    // Z - Future use
+    //   should (must?) be 0
+
+    // Ad - Authentic Data
+    //   see https://datatracker.ietf.org/doc/html/rfc6840#section-5.7
+
+    // Cd - Checking disabled
+    //   expected to be copied from query to response, should be always set
+    //   see https://datatracker.ietf.org/doc/html/rfc6840#section-5.9
+
+    // Rcode - Response code
+    //   0 no error
+    //   1 format error
+    //   2 server failure
+    //   3 nxdomain
+    //   4 not implemented (literally error code)
+    //   5 refused
+    //   6 name exists when it should not
+    //   7 RR set exists when it should not
+    //   8 RR does not exist when it should
+    //   9 server not auth for zone OR not authorized
+    //   10 name not in zone
+    //   11-15 future use
+    //   there are others, see RFC for details
+
+    // Qdcount - Number of entries in question section
+
+    // Ancount - Number of RRs in answer section
+
+    // Nscount - Number of NS in authority section
+
+    // Arcount - Number of records in additional records section
+
+
+
+
+//
+// Question
+                                    1  1  1  1  1  1
+      0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                                               |
+    /                     QNAME                     /
+    /                                               /
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                     QTYPE                     |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                     QCLASS                    |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;; QUESTION SECTION:
+;incoming.telemetry.mozilla.org.	IN	A
+
+
+
+//
+// Answer (DNS RR)
+// question (above) followed by N+1 answers (bellow)
+                                  1  1  1  1  1  1
+    0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                                               |
+    /                                               /
+    /                     NAME                      /
+    /                                               /
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                     TYPE                      |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                     CLASS                     |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                     TTL                       |
+    |                                               |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                   RDLENGTH                    |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
+    /                    RDATA                      /
+    /                                               /
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;; ANSWER SECTION:
+incoming.telemetry.mozilla.org.	                    51  IN  CNAME	telemetry-incoming.r53-2.services.mozilla.com.
+telemetry-incoming.r53-2.services.mozilla.com.      300 IN  CNAME   telemetry-incoming-b.r53-2.services.mozilla.com.
+telemetry-incoming-b.r53-2.services.mozilla.com.    300 IN	CNAME   prod.ingestion-edge.prod.dataops.mozgcp.net.
+prod.ingestion-edge.prod.dataops.mozgcp.net.        60	IN  A       35.227.207.240
