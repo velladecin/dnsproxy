@@ -22,6 +22,10 @@ func main() {
             q.SetRcodeNoErr()
             q.SetAdFalse()
 
+            //rr := NewRr("cnn.com", "1.1.1.1", RrTtl(100), RrClass(CH), RrType(CNAME))
+            rr := NewRr("cnn.com", "1.1.1.1") // , RrTtl(100), RrClass(CH), RrType(CNAME))
+            q.SetRR(rr)
+
             fmt.Printf("%+v\n", q)
             fmt.Printf("%b\n", q.header[3])
             return q

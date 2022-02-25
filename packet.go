@@ -2,6 +2,9 @@ package main
 
 import (
     "fmt"
+    "strings"
+    "regexp"
+    "strconv"
 )
 
 type packet []byte
@@ -222,7 +225,11 @@ func (p *Pskel) SetARcount(i int) error {
 // ##
 // ## Resource Records mods
 func (p *Pskel) SetRR(rr *Rr) {
+    p.rr = append(p.rr, rr.PacketBytes())
+    p.SetANcount(len(p.rr))
+    // TODO RFC6891 - OPT pseudo-RR
 }
+
 
 // ###################
 // ## Resource Recs ##
@@ -234,17 +241,60 @@ type Rr struct {
     Ttype, Class, Ttl int
 }
 
+// TODO
+// start with l1, l2 single string
+// later move onto []string of [l1,l2] to do smth like
+// incoming.telemetry.mozilla.org.	33 IN	CNAME	telemetry-incoming.r53-2.services.mozilla.com.
+// telemetry-incoming.r53-2.services.mozilla.com. 88 IN CNAME prod.ingestion-edge.prod.dataops.mozgcp.net.
+// prod.ingestion-edge.prod.dataops.mozgcp.net. 33	IN A 34.120.208.123
+
+var ipx = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
 func NewRr(l1, l2 string, mods ...RrMod) *Rr {
     rr := &Rr{l1, l2, A, IN, 218}
     for _, m := range mods {
         m(rr)
     }
 
+    // TODO deal with L1 somehow
+
+    // currently L2 must be IP addr
+    if ok := ipx.MatchString(rr.L2); !ok {
+        panic("Invalid IP addr in RR")
+    }
+
     return rr
 }
+func (rr *Rr) PacketBytes() []byte {
+    l2 := strings.Split(rr.L2, ".")
+    length := 10        // 2B pointer + 2B TYPE + 2B CLASS + 4B TTL
+    length += 2         // 2B len(l2)
+    length += len(l2)   // xB l2 value
 
+    b := make([]byte, length)
+    for i:=0; i<12; i++ {
+        switch i {
+        case 0:                 b[i] = 192
+        case 1:                 b[i] = 12
+        case 2, 4, 6, 7, 8, 10: b[i] = 0
+        case 3:                 b[i] = byte(rr.Ttype)
+        case 5:                 b[i] = byte(rr.Class)
+        case 9:                 b[i] = byte(rr.Ttl)
+        case 11:                b[i] = byte(len(l2))
+        }
+    }
+
+    for i, j := 0, 12; i<len(l2); i++ {
+        a, _ := strconv.Atoi(l2[i])
+        b[j] = byte(a)
+        j++
+    }
+
+    return b
+}
+
+// mods
 func RrTtl(ttl int) RrMod {
-    if ttl > 999 {
+    if ttl > 254 { // single byte fit
         panic(fmt.Sprintf("Unsupported RR TTL value: %d", ttl))
     }
 
