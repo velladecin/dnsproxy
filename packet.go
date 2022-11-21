@@ -3,400 +3,291 @@ package main
 import (
     "fmt"
     "strings"
-    "regexp"
     "strconv"
+    "regexp"
 )
 
-type packet []byte
+type Packet []byte
+type Headers []byte
 
-// packet skeleton
-type Pskel struct {
-    header, question, footer []byte
-    rr [][]byte
-}
+func (p Packet) GetHeaders() Headers { return Headers(p[0:QUESTION_LABEL_START]) }
+func (p Packet) Question() string {
+    var q string
+    l := int(p[QUESTION_LABEL_START])
+    for i:=QUESTION_LABEL_START+1;; {
+        q += string(p[i:i+l])
 
-func NewPacketSkeleton(p packet) (*Pskel, error) {
-    skel := &Pskel{header: p[:QUESTION_LABEL_START]}
-
-    // question
-    for i:=QUESTION_LABEL_START; i<len(p); i++ {
-        if p[i] == 0 {
-            // end of question followed by 2+2 bytes of type, class
-            // +1 (extra) to account for slice range definition
-            skel.question = p[QUESTION_LABEL_START:i+5]
-            break
-        }
-    }
-
-    cur_pos := len(skel.header) + len(skel.question)
-
-    // QUERY/question label ends here
-    if skel.Type() == QUERY {
-        skel.footer = p[cur_pos:]
-        return skel, nil
-    }
-
-    // answer (RRs)
-    // L1                  TTL CLASS     TYPE   L2
-    // -------------------------------------------------------
-    // c1.domain.com.		10	  IN	CNAME	c2.domain.com.
-    // c2.domain.com.       10    IN        A   1.1.1.1
-
-    for i:=cur_pos; i<len(p); i++ {
-        // 0 is end of L1 (first byte of TYPE)
-        // 2 bytes of TYPE, 2 bytes of CLASS, 4 bytes of TTL
-        // 2 bytes of total length of L2
-        if p[i] == 0 {
-            // verify end, 2 zero bytes
-            if (p[i] | p[i+1]) == 0 {
-                skel.footer = p[i:]
-                break
-            }
-
-            i += 8                      // type, class, ttl
-            i += makeUint(p[i:i+2]) + 1 // L2 length + 1 to accomodate range syntax
-
-            // don't increment i any further,
-            // it'll increment itself on top of loop
-            skel.rr = append(skel.rr, p[cur_pos:i+1])
-            cur_pos = i + 1
-        }
-    }
-
-    return skel, nil
-}
-
-func (p *Pskel) Question() string {
-    var question string
-    for i:=0; i<len(p.question); {
-        l := int(p.question[i])
+        i += l
+        l = int(p[i])
         if l == 0 {
-            // ignore last 4 bytes of CLASS, TYPE
             break
         }
 
         i++
-        if question != "" {
-            question += "."
+        q += "."
+    }
+    return q
+}
+
+func (h Headers) SetAnswer() { h[Flags1] |= (1<<QR) }
+
+//
+// RR
+
+type rr struct {
+    l1, l2 string
+    typ int
+}
+type rrset []*rr
+type labelMap struct {
+    bytes []byte
+    lmap map[string]int
+}
+func mapLabel(s string, question bool) labelMap {
+    // offset our substring to *not* include '.' (+1)
+    // offset position to account for length at the beginning of label (+1)
+    // QUESTION has a single byte of length
+    // RR has two bytes of RDLENGTH
+    offset := RDLENGTH
+    if question {
+        offset--
+    }
+    m := make(map[string]int)
+    b := make([]byte, len(s)+offset+1) // +1 for '.' (root) at the end
+
+    l:=0
+    for i:=len(s)-1; i>=0; i-- {
+        if s[i] == '.' {
+            pos := i+offset
+            m[s[pos:]] = pos // mapping
+            b[pos] = byte(l) // bytes
+            l = 0
+            continue
         }
 
-        question += string(p.question[i:i+l])
-        i += l
+        if i == 0 {
+            //m[s] = 0
+            m[s] = offset-1
+        }
+
+        b[i+offset] = s[i]
+        l++
     }
-
-    return question
+    b[offset-1] = byte(l)
+    return labelMap{b, m}
 }
+func run(rs rrset) {
+    rs.validate()
+    // packet
+    // 1st dimension is the full packet - N+1 bytes
+    // 2nd dimension is each RRs        - N+1 RRs
+    // 3rd dimension is the actual RR   - [label1], [type, class, ttl], [label2]
+    // [    # packet
+    //  [   # RR
+    //   ["label1.com"], [type, class, ttl], ["label2.com" or IP]
+    //  ],
+    //  ... # N+1 RRs
+    // ]
+    packet := make([][][]byte, 1+len(rs)) // QUESTION + RRs
+    lmap := make(map[string]int)
 
-func (p *Pskel) Type() int {
-    i, _ := getBit(p.header[Flags2], QR)
-    return i
-}
+    // QUESTION:
+    // same as first label and fully serialized (no pointer)
+    lm := mapLabel(rs[0].l1, true)
+    lmap = lm.lmap
+    packet[0] = make([][]byte, Q_PARTSLEN)
+    packet[0] = [][]byte{lm.bytes, []byte{0, 1, 0, 1}}
 
-func (p *Pskel) TypeString() string {
-    if p.Type() == QUERY {
-        return "QUERY"
+    // RRs
+    for i, r := range rs {
+        j := i+1
+        packet[j] = make([][]byte, RR_PARTSLEN)
+
+        // l1 - always known
+        packet[j][0] = []byte{COMPRESSED_LABEL, byte(lmap[r.l1]+HEADERSLEN)}
+
+        // TYPE(2), CLASS(2), TTL(4)
+        packet[j][1] = []byte{0, byte(r.typ), 0, 1, 0, 0, 0, 6}
+
+        // l2 - always unknown
+        switch r.typ {
+            case A:
+            needsroot := false
+            if i == len(rs)-1 {
+                needsroot = true
+            }
+            packet[j][2] = serializeIp(r.l2, needsroot)
+
+            case CNAME:
+            // offset is real position (index) of start of this label in the packet and has 3 parts
+            // 1. headers
+            currpos := 0
+            // 2. N+1 previous RRs
+            for n:=0; n<=i; n++ {
+                for m:=0; m<len(packet[n]); m++ {
+                    currpos += len(packet[n][m])
+                }
+            }
+            // 3. its own l1 + class/type/ttl
+            //    +1 as we're currently at last index before the label start
+            currpos += len(packet[j][0])+len(packet[j][1])
+            // TODO catch if this already exists as it may indicate a CNAME loop,
+            // validateHostname() should catch this though..?
+            //lmap[r.l2] = offset + RDLENGTH
+            lmap[r.l2] = currpos+RDLENGTH
+            lm = mapLabel(r.l2, false)
+
+            // have populated lmap with new values
+            // now I need to split the label to find what needs to be serialized and what is to come from lmap
+            for n:=0; n<len(r.l2); n++ {
+                if r.l2[n] == '.' {
+                    // found a match
+                    if pos, isknown := lmap[r.l2[n+1:]]; isknown {
+                        b1 := serializeString(r.l2[:n], false)  // serialize unknown part
+                        b2 := []byte{192, byte(pos)}            // make pointer to the known part
+                        packet[j][2] = make([]byte, RDLENGTH+len(b1)+len(b2))
+                        packet[j][2][0] = byte(0)
+                        packet[j][2][1] = byte(len(b1)+len(b2))
+                        // populate with b1 + b2
+                        x := 0
+                        for ; x<len(b1); x++ {
+                            packet[j][2][RDLENGTH+x] = b1[x]
+                        }
+                        for y:=0; y<len(b2); y++ {
+                            packet[j][2][RDLENGTH+x+y] = b2[y]
+                        }
+
+                        break
+                    }
+
+                    // no known match, record it here
+                    lmap[r.l2[n+1:]] = currpos+n
+                }
+            }
+
+            // no match, serialize the full label
+            if len(packet[j][2]) == 0 {
+                b2 := serializeString(r.l2, true)
+                b2len := len(b2)
+
+                packet[j][2] = make([]byte, RDLENGTH+b2len)
+                packet[j][2][0] = byte(0)
+                packet[j][2][1] = byte(b2len)
+                // populate with b2
+                for x:=0; x<len(b2); x++ {
+                    packet[j][2][RDLENGTH+x] = b2[x]
+                }
+            }
+        }
     }
+    //fmt.Printf("2. lmap: %+v\n", lmap)
+    //fmt.Printf("2. PACKET: %+v\n", packet)
 
-    return "ANSWER"
-}
-
-func (p *Pskel) Bytes() []byte {
-    var b []byte
-    b = append(b, p.header...)
-    b = append(b, p.question...)
-
-    for _, r := range p.rr {
-        b = append(b, r...)
+    for i:=0; i<len(packet); i++ {
+        for j:=0; j<len(packet[i]); j++ {
+            for k:=0; k<len(packet[i][j]); k++ {
+                fmt.Printf("%+v ", packet[i][j][k])
+            }
+        }
     }
-
-    b = append(b, p.footer...)
-    return b
 }
-
-// ##################
-// ## Headers Mods ##
-// ##################
-
-// ##
-// ## Flags - byte 1
-// QR
-func (p *Pskel) SetQuery() { p.header[Flags1], _ = unsetBit(p.header[Flags1], QR) }
-func (p *Pskel) SetAnswer()  { p.header[Flags1] |= (1<<QR) }
-// OPCODE
-func (p *Pskel) SetOpcode(i int) error {
-    if i < QUERY || i > UPDATE {
-        return fmt.Errorf("OPCODE value not supported: %d", i)
+func serializeIp(ip string, addroot bool) []byte {
+    // +2 to add 2 bytes of length (for ipv4), also rpos below
+    // +1 to add root (0) if desired
+    offset := 2
+    if addroot {
+        offset++
     }
+    ret := make([]byte, 4+offset)
+    ret[0] = 0
+    ret[1] = 4
 
-    p.header[Flags1], _ = unsetBit(p.header[Flags1], 6, 5, 4, 3)
-    p.header[Flags1] |= uint8(i)
-    return nil
-}
-func (p *Pskel) SetOpcodeQuery() error { return p.SetOpcode(QUERY) } // 99% of requests will be for DNS resolution (OPCODE query)
-// AA
-func (p *Pskel) SetAaTrue() {p.header[Flags1] |= (1<<AA)}
-func (p *Pskel) SetAaFalse() {p.header[Flags1], _ = unsetBit(p.header[Flags1], AA)}
-// TC
-func (p *Pskel) SetTcTrue() {p.header[Flags1] |= (1<<TC)}
-func (p *Pskel) SetTcFalse() {p.header[Flags1], _ = unsetBit(p.header[Flags1], TC)}
-// RD
-func (p *Pskel) SetRdTrue() {p.header[Flags1] |= (1<<RD)}
-func (p *Pskel) SetRdFalse() {p.header[Flags1], _ = unsetBit(p.header[Flags1], RD)}
-
-// ##
-// ## Flags - byte 2
-// RA
-func (p *Pskel) SetRaTrue() { p.header[Flags2] |= (1<<RA) }
-func (p *Pskel) SetRaFalse() { p.header[Flags2], _ = unsetBit(p.header[Flags2], RA)}
-// AD
-func (p *Pskel) SetAdTrue() { p.header[Flags2] |= (1<<AD) }
-func (p *Pskel) SetAdFalse() { p.header[Flags2], _ = unsetBit(p.header[Flags2], AD)}
-// RCODE
-func (p *Pskel) SetRcode(i int) error {
-    if i < NOERROR || i > NAME_NOT_IN_ZONE {
-        return fmt.Errorf("RCODE value not supported: %d", i)
+    for i, octet := range strings.Split(ip, ".") {
+        o, err := strconv.Atoi(string(octet))
+        if err != nil {
+            panic(err)
+        }
+        rpos := i+2
+        ret[rpos] = byte(o)
     }
-
-    p.header[Flags2], _ = unsetBit(p.header[Flags2], 3, 2, 1, 0)
-    p.header[Flags2] |= uint8(i)
-    return nil
+    return ret
 }
-func (p *Pskel) SetRcodeNoErr() error { return p.SetRcode(NOERROR) }
-func (p *Pskel) SetRcodeFmtErr() error { return p.SetRcode(FORMATERROR) }
-func (p *Pskel) SetRcodeServFail() error { return p.SetRcode(SERVFAIL) }
-func (p *Pskel) SetRcodeNxdomain() error { return p.SetRcode(NXDOMAIN) }
-func (p *Pskel) SetNxDomain() error { return p.SetRcodeNxdomain() } // likely used often
-func (p *Pskel) SetRcodeNotImpl() error { return p.SetRcode(NOTIMPLEMENTED) }
-func (p *Pskel) SetRcodeRefused() error { return p.SetRcode(REFUSED) }
-func (p *Pskel) SetRcodeNoAuth() error { return p.SetRcode(NOAUTH) }
-func (p *Pskel) SetRcodeNotInZone() error { return p.SetRcode(NAME_NOT_IN_ZONE) }
-
-// ##
-// ## Header counts
-func (p *Pskel) SetHeaderCount(pos, i int) error {
-    if pos < QDcount1 || pos > ARcount2 {
-        return fmt.Errorf("Invalid header count byte position: %d", pos)
+func serializeString(s string, addroot bool) []byte {
+    // replace all '.' with length of that label
+    // add (+1) to add length of first label
+    // add (+1) to add root (0) if desired
+    offset := 1
+    if addroot {
+        offset++
     }
+    ret := make([]byte, len(s)+offset)
 
-    p.header[pos] = byte(i)
-    return nil
-}
-// QDcount
-func (p *Pskel) SetQDcount(i int) error {
-    if err := validHeaderCount(i); err != nil {
-        return err
+    l:=0
+    for i:=len(s)-1; i>=0; i-- {
+        rpos := i+1 // +1 for length of first label
+        if s[i] == '.' {
+            ret[rpos] = byte(l)
+            l = 0
+            continue
+        }
+
+        ret[rpos] = s[i]
+        l++
     }
-
-    p.SetHeaderCount(QDcount1, 0)
-    p.SetHeaderCount(QDcount2, i)
-    return nil
+    ret[0] = byte(l) // first label length
+    return ret
 }
-// ANcount
-func (p *Pskel) SetANcount(i int) error {
-    if err := validHeaderCount(i); err != nil {
-        return err
-    }
-
-    p.SetHeaderCount(ANcount1, 0)
-    p.SetHeaderCount(ANcount2, i)
-    return nil
-}
-// NScount
-func (p *Pskel) SetNScount(i int) error {
-    if err := validHeaderCount(i); err != nil {
-        return err
-    }
-
-    p.SetHeaderCount(NScount1, 0)
-    p.SetHeaderCount(NScount2, i)
-    return nil
-}
-// ARcount
-func (p *Pskel) SetARcount(i int) error {
-    if err := validHeaderCount(i); err != nil {
-        return err
-    }
-
-    p.SetHeaderCount(ARcount1, 0)
-    p.SetHeaderCount(ARcount2, i)
-    return nil
-}
-
-// ##
-// ## Resource Records mods
-func (p *Pskel) SetRR(rr *Rr) {
-    p.rr = append(p.rr, rr.PacketBytes())
-    p.SetANcount(len(p.rr))
-    // TODO RFC6891 - OPT pseudo-RR
-}
-
-
-// ###################
-// ## Resource Recs ##
-// ###################
-
-type RrMod func(*Rr)
-type Rr struct {
-    L1, L2 string
-    Ttype, Class, Ttl int
-}
-
-// TODO
-// start with l1, l2 single string
-// later move onto []string of [l1,l2] to do smth like
-// incoming.telemetry.mozilla.org.	33 IN	CNAME	telemetry-incoming.r53-2.services.mozilla.com.
-// telemetry-incoming.r53-2.services.mozilla.com. 88 IN CNAME prod.ingestion-edge.prod.dataops.mozgcp.net.
-// prod.ingestion-edge.prod.dataops.mozgcp.net. 33	IN A 34.120.208.123
-
-var ipx = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
-func NewRr(l1, l2 string, mods ...RrMod) *Rr {
-    rr := &Rr{l1, l2, A, IN, 218}
-    for _, m := range mods {
-        m(rr)
-    }
-
-    // TODO deal with L1 somehow
-
-    // currently L2 must be IP addr
-    if ok := ipx.MatchString(rr.L2); !ok {
-        panic("Invalid IP addr in RR")
-    }
-
-    return rr
-}
-func (rr *Rr) PacketBytes() []byte {
-    l2 := strings.Split(rr.L2, ".")
-    length := 10        // 2B pointer + 2B TYPE + 2B CLASS + 4B TTL
-    length += 2         // 2B len(l2)
-    length += len(l2)   // xB l2 value
-
-    b := make([]byte, length)
-    for i:=0; i<12; i++ {
-        switch i {
-        case 0:                 b[i] = 192
-        case 1:                 b[i] = 12
-        case 2, 4, 6, 7, 8, 10: b[i] = 0
-        case 3:                 b[i] = byte(rr.Ttype)
-        case 5:                 b[i] = byte(rr.Class)
-        case 9:                 b[i] = byte(rr.Ttl)
-        case 11:                b[i] = byte(len(l2))
+func (rs rrset) validate() bool {
+    // 1. set of A records
+    // 2. chain of CNAME records
+    for _, r := range rs {
+        switch r.typ {
+            case A: validateA(r.l1, r.l2)
+            case CNAME: validateCNAME(r.l1, r.l2)
+            default:
+                panic("Invalid DNS record")
         }
     }
 
-    for i, j := 0, 12; i<len(l2); i++ {
-        a, _ := strconv.Atoi(l2[i])
-        b[j] = byte(a)
-        j++
-    }
-
-    return b
+    return true
 }
-
-// mods
-func RrTtl(ttl int) RrMod {
-    if ttl > 254 { // single byte fit
-        panic(fmt.Sprintf("Unsupported RR TTL value: %d", ttl))
+var hostx *regexp.Regexp = regexp.MustCompile(`[a-z0-9\-\.]+`)
+var ipx *regexp.Regexp = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
+func validateA(host, ip string) bool { return validateHostname(host) == validateIp(ip) }
+func validateCNAME(host1, host2 string) bool { return validateHostname(host1) == validateHostname(host2) }
+func validateHostname(hostname string) bool {
+    if ! hostx.MatchString(hostname) {
+        panic("Hostname can only contain: a-z 0-9 - .")
+    }
+    h := strings.Split(hostname, ".")
+    if len(h) < 2 {
+        panic("Hostname must have at least 2 parts/domains")
     }
 
-    return func(r *Rr) {
-        r.Ttl = ttl
-    }
+    return true
 }
-func RrClass(class int) RrMod {
-    if class < IN || class > HS {
-        panic(fmt.Sprintf("Unsupported RR CLASS value: %d", class))
+func validateIp(ip string) bool {
+    if ! ipx.MatchString(ip) {
+        panic("IP must be in format: num.num.num.num")
     }
 
-    return func(r *Rr) {
-        r.Class = class
-    }
-}
-func RrType(ttype int) RrMod {
-    if ttype < A || ttype > TXT {
-        panic(fmt.Sprintf("Unsupported RR TYPE value: %d", ttype))
-    }
-
-    return func(r *Rr) {
-        r.Ttype = ttype
-    }
-}
-
-
-
-// ######################
-// ## Helper functions ##
-// ######################
-
-func validHeaderCount(i int) error {
-    if i < 0 || i > 100 {
-        return fmt.Errorf("Unsupported header count value: %d", i)
-    }
-
-    return nil
-}
-
-func makeUint(b []byte) int {
-    var i int
-    switch len(b) {
-    case 2: i = int(b[0])<<8  | int(b[1])
-    case 3: i = int(b[0])<<16 | int(b[1])<<8  | int(b[2])
-    case 4: i = int(b[0])<<32 | int(b[1])<<16 | int(b[2])<<8 | int(b[3])
-    default:
-        panic(fmt.Sprintf("Unsupported integer size: %d", len(b)))
-    }
-
-    return i
-}
-
-// Max 8 values allowed in []pos (8 bits per byte)
-// Each values must be between 0-7 (bit index 0 - 7 within the byte)
-func unsetBit(b byte, pos ...int) (byte, error) {
-    if len(pos) < 1 || len(pos) > 8 {
-        return b, fmt.Errorf("8 bits in byte, got: %d", len(pos))
-    }
-
-    original := b
-    for _, p := range pos {
-        if err := validBitPos(p); err != nil {
-            return original, err
+    for i, octet := range strings.Split(ip, ".") {
+        o, err := strconv.Atoi(octet) 
+        if err != nil {
+            panic(err)
         }
 
-        b |= (1<<p) // set
-        b ^= (1<<p) // xor
+        if o > 255 {
+            panic("IP octet invalid: > 255")
+        }
+        maxlow := 0
+        if i == 0 { // first octet must be 1+
+            maxlow = 1
+        }
+        if o < maxlow {
+            panic(fmt.Sprintf("IP octet invalid: < %d", maxlow))
+        }
     }
 
-    return b, nil
-}
-
-func isBitSet(b byte, pos int) (bool, error) {
-    set, err := getBit(b, pos)
-    if err != nil {
-        return false, err
-    }
-
-    if set == 1 {
-        return true, nil
-    }
-
-    return false, nil
-}
-
-func getBit(b byte, pos int) (int, error) {
-    if err := validBitPos(pos); err != nil {
-        return -1, err
-    }
-
-    if (b & (1<<pos)) == 0 {
-        return 0, nil
-    }
-
-    return 1, nil
-}
-
-func validBitPos(pos int) error {
-    if pos < 0 || pos > 7 {
-        return fmt.Errorf("0-7 bit indices in byte, got: %d", pos)
-    }
-
-    return nil
+    return true
 }

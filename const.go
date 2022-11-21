@@ -125,7 +125,12 @@ const (
 const (
     QUESTION_LABEL_START = 12
     COMPRESSED_LABEL = 192  // 11000000
+    RDLENGTH = 2
     LABEL_END = 41
+
+    Q_PARTSLEN = 2      // label, type/class
+    RR_PARTSLEN = 3     // label, type/class/ttl, label
+    HEADERSLEN = 12
 )
 
 // TYPE

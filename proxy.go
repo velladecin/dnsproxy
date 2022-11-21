@@ -37,8 +37,11 @@ type DnsProxy struct {
     // Question handler accepts *Pskel (question) as argument and may return *Pskel (its own answer).
     // If return is nil question will be passed up to the default upstream to be answered.
     // Setting answerHandler while returning answer from questionHandler will have no effect on the answer.
-    questionHandler func(*Pskel) *Pskel // question
-    answerHandler func(*Pskel)          // answer
+    //questionHandler func(*Pskel) *Pskel // question
+    //answerHandler func(*Pskel)          // answer
+
+    //handler func(*Pskel) *Pskel
+    handler func(Packet) *Packet
 }
 
 func NewDnsProxy(upstream ...string) (*DnsProxy, error) {
@@ -61,21 +64,23 @@ func NewDnsProxy(upstream ...string) (*DnsProxy, error) {
     return &dx, nil
 }
 
-func (dx *DnsProxy) QuestionHandler(h func(*Pskel) *Pskel) { dx.questionHandler = h }
-func (dx *DnsProxy) AnswerHandler(h func(*Pskel)) { dx.answerHandler = h }
+//func (dx *DnsProxy) QuestionHandler(h func(*Pskel) *Pskel) { dx.questionHandler = h }
+//func (dx *DnsProxy) AnswerHandler(h func(*Pskel)) { dx.answerHandler = h }
+//func (dx *DnsProxy) Handler(h func(*Pskel) *Pskel) { dx.handler = h }
+func (dx *DnsProxy) Handler(h func(p Packet) *Packet) { dx.handler = h }
 
-func (dx *DnsProxy) proxy_new(query []byte, client net.Addr) {
-    qskel, err := NewPacketSkeleton(query)
-    if err != nil {
-        panic(err)
+func (dx *DnsProxy) proxy_new(question Packet, client net.Addr) {
+    //q := question.Question()
+    //fmt.Println(q)
+
+    if dx.handler != nil {
+        fmt.Println("handling request")
+        p := dx.handler(question)
+        fmt.Printf("%+v\n", p)
     }
 
-    var askel *Pskel
-    if dx.questionHandler != nil {
-        askel = dx.questionHandler(qskel)
-    }
-
-    if askel == nil {
+    //if askel == nil {
+        /*
         upstream := <-dx.upstreamConn
         defer upstream.Close()
 
@@ -92,21 +97,27 @@ func (dx *DnsProxy) proxy_new(query []byte, client net.Addr) {
             panic(err)
         }
 
+        fmt.Printf("### %+v\n", p)
         askel, err = NewPacketSkeleton(p)
         if err != nil {
             panic(err)
         }
+        */
 
+        /*
         if dx.answerHandler != nil {
             dx.answerHandler(askel)
         }
-    }
+        */
+    //}
 
     // Downstream write (back) answer
+    /*
     _, err = dx.Listener.WriteTo(askel.Bytes(), client)
     if err != nil {
         panic(err)
     }
+    */
 }
 
 func (dx *DnsProxy) Accept() {
@@ -120,7 +131,7 @@ func (dx *DnsProxy) Accept() {
         }
 
         // offload to free the receiver
-        go dx.proxy_new(query, addr)
+        go dx.proxy_new(Packet(query), addr)
     }
 }
 
