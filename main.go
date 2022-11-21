@@ -12,20 +12,35 @@ func main() {
     }
 
     r1 := rrset{
-        &rr{"google.com", "1.1.1.1", 1},
-        &rr{"google.com", "2.2.2.2", 1}}
-    fmt.Printf("%+v\n", r1)
+        &rr{"google.com", "1.1.1.1", 1, 100},
+        &rr{"google.com", "2.2.2.2", 1, 200}}
+    fmt.Printf("r1: %+v\n", r1)
 
-    dx.Handler(func (p Packet) *Packet {
-        fmt.Printf("%+v\n", p)
-        var answer Packet
-        if p.Question() == "google.com" {
-            h := p.GetHeaders()
+    dx.Handler(func (question Packet) *Packet {
+        fmt.Printf("question: %+v\n", question)
+
+        var answer *Packet
+        if question.Question() == "google.com" {
+            h := question.GetHeaders()
             h.SetAnswer()
-            fmt.Printf("headers: %+v\n", h)
+
+            body := run(r1)
+            b := make([]byte, len(h) + len(body))
+
+            i := 0
+            for ; i<len(h); i++ {
+                b[i] = h[i]
+            }
+            for j:=0; j<len(body); j++ {
+                b[i+j] = body[j]
+            }
+
+            answer = (*Packet)(&b)
         }
 
-        return &answer
+        fmt.Printf("atype: %T\n", answer)
+        fmt.Printf("ans: %+v\n", answer)
+        return answer
     })
 
 /*

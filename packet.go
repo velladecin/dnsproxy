@@ -36,7 +36,7 @@ func (h Headers) SetAnswer() { h[Flags1] |= (1<<QR) }
 
 type rr struct {
     l1, l2 string
-    typ int
+    typ, ttl int
 }
 type rrset []*rr
 type labelMap struct {
@@ -76,7 +76,7 @@ func mapLabel(s string, question bool) labelMap {
     b[offset-1] = byte(l)
     return labelMap{b, m}
 }
-func run(rs rrset) {
+func run(rs rrset) []byte {
     rs.validate()
     // packet
     // 1st dimension is the full packet - N+1 bytes
@@ -107,7 +107,7 @@ func run(rs rrset) {
         packet[j][0] = []byte{COMPRESSED_LABEL, byte(lmap[r.l1]+HEADERSLEN)}
 
         // TYPE(2), CLASS(2), TTL(4)
-        packet[j][1] = []byte{0, byte(r.typ), 0, 1, 0, 0, 0, 6}
+        packet[j][1] = []byte{0, byte(r.typ), 0, 1, 0, 0, 0, byte(r.ttl)}
 
         // l2 - always unknown
         switch r.typ {
@@ -183,13 +183,17 @@ func run(rs rrset) {
     //fmt.Printf("2. lmap: %+v\n", lmap)
     //fmt.Printf("2. PACKET: %+v\n", packet)
 
+    r := make([]byte, 0)
     for i:=0; i<len(packet); i++ {
         for j:=0; j<len(packet[i]); j++ {
             for k:=0; k<len(packet[i][j]); k++ {
-                fmt.Printf("%+v ", packet[i][j][k])
+                //fmt.Printf("%+v ", packet[i][j][k])
+                r = append(r, packet[i][j][k])
             }
         }
     }
+    //fmt.Printf("r: %+v\n", r)
+    return r
 }
 func serializeIp(ip string, addroot bool) []byte {
     // +2 to add 2 bytes of length (for ipv4), also rpos below
