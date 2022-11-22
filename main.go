@@ -11,9 +11,23 @@ func main() {
         panic(err)
     }
 
+    /*
     r1 := rrset{
         &rr{"google.com", "1.1.1.1", 1, 100},
-        &rr{"google.com", "2.2.2.2", 1, 200}}
+        &rr{"google.com", "2.2.2.2", 1, 200},
+        &rr{"google.com", "3.3.3.3", 1, 300}}
+        */
+    /*
+    r1 := rrset{
+        &rr{"google.com", "telemetry-incoming.r53-2.services.mozilla.com", 5, 10},
+        &rr{"telemetry-incoming.r53-2.services.mozilla.com", "prod.ingestion-edge.prod.dataops.mozgcp.net", 5, 20},
+        &rr{"prod.ingestion-edge.prod.dataops.mozgcp.net", "34.120.208.123", 1, 30}}
+        */
+    r1 := rrset{
+        &rr{"google.com", "velladec.org", 5, 10},
+        &rr{"velladec.org", "velladec.in", 5, 20},
+        &rr{"velladec.in", "1.1.1.1", 1, 20},
+        &rr{"velladec.in", "2.2.2.2", 1, 30}}
     fmt.Printf("r1: %+v\n", r1)
 
     dx.Handler(func (question Packet) *Packet {
@@ -23,16 +37,29 @@ func main() {
         if question.Question() == "google.com" {
             h := question.GetHeaders()
             h.SetAnswer()
+            h.setANcount(len(r1))
+            h.setAA()
+            h.setRA(true)
 
             body := run(r1)
             b := make([]byte, len(h) + len(body))
 
+            /*
             i := 0
             for ; i<len(h); i++ {
                 b[i] = h[i]
             }
             for j:=0; j<len(body); j++ {
                 b[i+j] = body[j]
+            }
+            */
+
+            for x:=0; x<(len(h)+len(body)); x++ {
+                if x >= len(h) {
+                    b[x] = body[x-len(h)]
+                } else {
+                    b[x] = h[x]
+                }
             }
 
             answer = (*Packet)(&b)

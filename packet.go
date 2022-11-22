@@ -29,7 +29,44 @@ func (p Packet) Question() string {
     return q
 }
 
-func (h Headers) SetAnswer() { h[Flags1] |= (1<<QR) }
+
+//
+// Headers
+
+// query (type) answer
+func (h Headers) setAnswer() { h[Flags1] |= (1<<QR) }
+// number or RRs in answer, assuming this fits in single byte
+func (h Headers) setANcount(i int) {
+    h[ANcount1] = byte(0)
+    h[ANcount2] = byte(i)
+}
+// auth answer
+func (h Headers) unsetAA() { h.aa(false) }
+func (h Headers) setAA()   { h.aa(true) }
+func (h Headers) aa(b bool) {
+    h[Flags1] |= (1<<AA)        // set
+    if ! b {
+        h[Flags1] ^= (1<<AA)    // unset
+    }
+}
+// recursion
+func (h Headers) unsetRD() { h.rd(false) }
+func (h Headers) setRD()   { h.rd(true) }
+func (h Headers) rd(b bool) {
+    h[Flags1] |= (1<<RD)
+    if ! b {
+        h[Flags1] ^= (1<<RD)
+    }
+}
+func (h Headers) unsetRA() { h.ra(false) }
+func (h Headers) setRA()   { h.ra(true) }
+func (h Headers) ra(b bool) {
+    h[Flags2] |= (1<<RA)
+    if ! b {
+        h[Flags2] ^= (1<<RA)
+    }
+}
+
 
 //
 // RR
@@ -116,6 +153,7 @@ func run(rs rrset) []byte {
             if i == len(rs)-1 {
                 needsroot = true
             }
+            fmt.Printf("i: %d <> ndr: %+v <> lbl: %s\n", i, needsroot, r.l2)
             packet[j][2] = serializeIp(r.l2, needsroot)
 
             case CNAME:

@@ -34,7 +34,7 @@ type DnsProxy struct {
     emptyPacket <-chan []byte
 
     // DNS packet handler
-    handler func(Packet) *Packet
+    handler func(question Packet) (answer *Packet)
 }
 
 func NewDnsProxy(upstream ...string) (*DnsProxy, error) {
