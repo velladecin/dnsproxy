@@ -8,10 +8,9 @@ import (
 )
 
 type Packet []byte
-type Headers []byte
 
-func (p Packet) GetHeaders() Headers { return Headers(p[0:QUESTION_LABEL_START]) }
-func (p Packet) Question() string {
+func (p Packet) getHeaders() []byte { return p[0:QUESTION_LABEL_START] }
+func (p Packet) questionString() string {
     var q string
     l := int(p[QUESTION_LABEL_START])
     for i:=QUESTION_LABEL_START+1;; {
@@ -28,44 +27,78 @@ func (p Packet) Question() string {
     }
     return q
 }
+func (p Packet) getAuthoritativeAnswer(rs rrset) *Packet {
+    a := p.getAnswer(rs)
+    a.setAA()
+    a.unsetRA()
+    return a
+}
+func (p Packet) getAnswer(rs rrset) *Packet {
+    h := Packet(p.getHeaders())
+    h.setAnswer()
+    h.setANcount(len(rs))
+    h.setRA()
+    h.unsetAD()
+
+    body := run(rs)
+    b := make([]byte, len(h)+len(body))
+    for x:=0; x<(len(h)+len(body)); x++ {
+        if x < len(h) {
+            b[x] = h[x]
+            continue
+        }
+        b[x] = body[x-len(h)]
+    }
+    return (*Packet)(&b)
+}
 
 
 //
 // Headers
 
 // query (type) answer
-func (h Headers) setAnswer() { h[Flags1] |= (1<<QR) }
+func (p Packet) setAnswer() { p[Flags1] |= (1<<QR) }
 // number or RRs in answer, assuming this fits in single byte
-func (h Headers) setANcount(i int) {
-    h[ANcount1] = byte(0)
-    h[ANcount2] = byte(i)
+func (p Packet) setANcount(i int) {
+    p[ANcount1] = byte(0)
+    p[ANcount2] = byte(i)
 }
-// auth answer
-func (h Headers) unsetAA() { h.aa(false) }
-func (h Headers) setAA()   { h.aa(true) }
-func (h Headers) aa(b bool) {
-    h[Flags1] |= (1<<AA)        // set
+// authoritative answer
+func (p Packet) unsetAA() { p.aa(false) }
+func (p Packet) setAA()   { p.aa(true) }
+func (p Packet) aa(b bool) {
+    p[Flags1] |= (1<<AA)        // set
     if ! b {
-        h[Flags1] ^= (1<<AA)    // unset
+        p[Flags1] ^= (1<<AA)    // unset
     }
 }
 // recursion
-func (h Headers) unsetRD() { h.rd(false) }
-func (h Headers) setRD()   { h.rd(true) }
-func (h Headers) rd(b bool) {
-    h[Flags1] |= (1<<RD)
+func (p Packet) unsetRD() { p.rd(false) }
+func (p Packet) setRD()   { p.rd(true) }
+func (p Packet) rd(b bool) {
+    p[Flags1] |= (1<<RD)
     if ! b {
-        h[Flags1] ^= (1<<RD)
+        p[Flags1] ^= (1<<RD)
     }
 }
-func (h Headers) unsetRA() { h.ra(false) }
-func (h Headers) setRA()   { h.ra(true) }
-func (h Headers) ra(b bool) {
-    h[Flags2] |= (1<<RA)
+func (p Packet) unsetRA() { p.ra(false) }
+func (p Packet) setRA()   { p.ra(true) }
+func (p Packet) ra(b bool) {
+    p[Flags2] |= (1<<RA)
     if ! b {
-        h[Flags2] ^= (1<<RA)
+        p[Flags2] ^= (1<<RA)
     }
 }
+// authentic data
+func (p Packet) unsetAD() { p.ad(false) }
+func (p Packet) setAD()   { p.ad(true) }
+func (p Packet) ad(b bool) {
+    p[Flags2] |= (1<<AD)
+    if ! b {
+        p[Flags2] ^= (1<<AD)
+    }
+}
+
 
 
 //

@@ -28,38 +28,38 @@ func main() {
         &rr{"velladec.org", "velladec.in", 5, 20},
         &rr{"velladec.in", "1.1.1.1", 1, 20},
         &rr{"velladec.in", "2.2.2.2", 1, 30}}
-    fmt.Printf("r1: %+v\n", r1)
+    r2 := rrset{
+        &rr{"decin.cz", "100.100.100.100", 1, 100},
+        &rr{"decin.cz", "200.200.200.200", 1, 200}}
+    //fmt.Printf("r1: %+v\n", r1)
+    //fmt.Printf("r2: %+v\n", r2)
 
-    dx.Handler(func (question Packet) *Packet {
-        fmt.Printf("question: %+v\n", question)
+    dx.Handler(func (query Packet) *Packet {
+        var answer *Packet
+        switch query.questionString() {
+        case "google.com":  answer = query.getAnswer(r1)
+        case "decin.cz":    answer = query.getAuthoritativeAnswer(r2)
+        }
+        return answer
 
+        /*
         var answer *Packet
         if question.Question() == "google.com" {
             h := question.GetHeaders()
-            h.SetAnswer()
+            h.setAnswer()
             h.setANcount(len(r1))
             h.setAA()
-            h.setRA(true)
+            h.setRA()
 
             body := run(r1)
             b := make([]byte, len(h) + len(body))
 
-            /*
-            i := 0
-            for ; i<len(h); i++ {
-                b[i] = h[i]
-            }
-            for j:=0; j<len(body); j++ {
-                b[i+j] = body[j]
-            }
-            */
-
             for x:=0; x<(len(h)+len(body)); x++ {
-                if x >= len(h) {
-                    b[x] = body[x-len(h)]
-                } else {
+                if x < len(h) {
                     b[x] = h[x]
+                    continue
                 }
+                b[x] = body[x-len(h)]
             }
 
             answer = (*Packet)(&b)
@@ -68,6 +68,7 @@ func main() {
         fmt.Printf("atype: %T\n", answer)
         fmt.Printf("ans: %+v\n", answer)
         return answer
+        */
     })
 
 /*
