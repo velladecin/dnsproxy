@@ -34,7 +34,7 @@ type DnsProxy struct {
     emptyPacket <-chan []byte
 
     // DNS packet handler
-    handler func(question Packet) (answer *Packet)
+    handler func(question Packet, client net.Addr) (answer *Packet)
 }
 
 func NewDnsProxy(upstream ...string) (*DnsProxy, error) {
@@ -57,18 +57,15 @@ func NewDnsProxy(upstream ...string) (*DnsProxy, error) {
     return &dx, nil
 }
 
-func (dx *DnsProxy) Handler(h func(question Packet) *Packet) { dx.handler = h }
+func (dx *DnsProxy) Handler(h func(question Packet, client net.Addr) *Packet) { dx.handler = h }
 func (dx *DnsProxy) proxy_new(question Packet, client net.Addr) {
-    //q := question.Question()
-    //fmt.Println(q)
-
     var answer *Packet
     if dx.handler != nil {
-        fmt.Println("handling request")
-        answer = dx.handler(question)
+        answer = dx.handler(question, client)
         fmt.Printf("proxy::answer %+v\n", answer)
     }
-
+    // handler() can return nil when no conditions are met there
+    // check answer and ask upstream if we have none yet (answer)
     if answer == nil {
         upstream := <-dx.upstreamConn
         defer upstream.Close()
@@ -89,8 +86,6 @@ func (dx *DnsProxy) proxy_new(question Packet, client net.Addr) {
         answer = (*Packet)(&p)
     }
 
-    // TODO TODO
-    // my answer gives extra '0' at the end of first A record so multiple A records don't show up
     fmt.Printf("fansw: %+v\n", answer)
     // Downstream write (back) answer
     _, err := dx.Listener.WriteTo(*answer, client)

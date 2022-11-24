@@ -2,7 +2,7 @@ package main
 
 import (
     "fmt"
-_    "regexp"
+    "net"
 )
 
 func main() {
@@ -17,58 +17,36 @@ func main() {
         &rr{"google.com", "2.2.2.2", 1, 200},
         &rr{"google.com", "3.3.3.3", 1, 300}}
         */
-    /*
-    r1 := rrset{
-        &rr{"google.com", "telemetry-incoming.r53-2.services.mozilla.com", 5, 10},
-        &rr{"telemetry-incoming.r53-2.services.mozilla.com", "prod.ingestion-edge.prod.dataops.mozgcp.net", 5, 20},
-        &rr{"prod.ingestion-edge.prod.dataops.mozgcp.net", "34.120.208.123", 1, 30}}
-        */
-    r1 := rrset{
-        &rr{"google.com", "velladec.org", 5, 10},
-        &rr{"velladec.org", "velladec.in", 5, 20},
-        &rr{"velladec.in", "1.1.1.1", 1, 20},
-        &rr{"velladec.in", "2.2.2.2", 1, 30}}
-    r2 := rrset{
-        &rr{"decin.cz", "100.100.100.100", 1, 100},
-        &rr{"decin.cz", "200.200.200.200", 1, 200}}
-    //fmt.Printf("r1: %+v\n", r1)
-    //fmt.Printf("r2: %+v\n", r2)
 
-    dx.Handler(func (query Packet) *Packet {
+    r1 := rrset{
+        &rr{"google.com", "velladec.org", CNAME, 10},
+        &rr{"velladec.org", "velladec.in", CNAME, 20},
+        &rr{"velladec.in", "1.1.1.1", A, 20},
+        &rr{"velladec.in", "2.2.2.2", A, 30}}
+    r2 := rrset{
+        &rr{l1: "decin.cz", l2: "100.100.100.100", typ: A, ttl: 100},
+        &rr{l1: "decin.cz", l2: "200.200.200.200", typ: A, ttl: 200}}
+    r3 := rrset{
+        //&rr{"incoming.telemetry.mozilla.org", "telemetry-incoming.r53-2.services.mozilla.com", 5, 10},
+        &rr{"bla.com", "telemetry-incoming.r53-2.services.mozilla.com", 5, 70},
+        &rr{"telemetry-incoming.r53-2.services.mozilla.com", "prod.ingestion-edge.prod.dataops.mozgcp.net", 5, 80},
+        &rr{"prod.ingestion-edge.prod.dataops.mozgcp.net", "34.120.208.123", 1, 90}}
+    //r4 := rrset{
+    //    &rr{"velladec.in", "in", "nxdomain"}}
+    //fmt.Printf("r4: %+v\n", r4)
+
+    dx.Handler(func (query Packet, client net.Addr) *Packet {
+        fmt.Printf("client: ===> %+v\n", client)
+        fmt.Printf("client: ===> %+v\n", client.Network())
+        fmt.Printf("client: ===> %+v\n", client.String())
         var answer *Packet
         switch query.questionString() {
         case "google.com":  answer = query.getAnswer(r1)
         case "decin.cz":    answer = query.getAuthoritativeAnswer(r2)
+        //case "incoming.telemetry.mozilla.org": answer = query.getAuthoritativeAnswer(r3)
+        case "bla.com": answer = query.getAuthoritativeAnswer(r3)
         }
         return answer
-
-        /*
-        var answer *Packet
-        if question.Question() == "google.com" {
-            h := question.GetHeaders()
-            h.setAnswer()
-            h.setANcount(len(r1))
-            h.setAA()
-            h.setRA()
-
-            body := run(r1)
-            b := make([]byte, len(h) + len(body))
-
-            for x:=0; x<(len(h)+len(body)); x++ {
-                if x < len(h) {
-                    b[x] = h[x]
-                    continue
-                }
-                b[x] = body[x-len(h)]
-            }
-
-            answer = (*Packet)(&b)
-        }
-
-        fmt.Printf("atype: %T\n", answer)
-        fmt.Printf("ans: %+v\n", answer)
-        return answer
-        */
     })
 
 /*
@@ -79,62 +57,6 @@ func main() {
         q.SetAnswer()
         fmt.Printf("h2: %+v\n", q.Headers())
         return q
-    })
-    */
-
-/*
-    dx.QuestionHandler(func(q *Pskel) *Pskel {
-        fmt.Printf("Q: %+v\n", q)
-
-        fmt.Println(q.Question())
-
-        if ok, _ := regexp.MatchString(`hxa-xxxxxx`, q.Question()); ok {
-            q.SetAnswer()
-            q.SetRaTrue()
-            q.SetRcodeNoErr()
-            q.SetAdFalse()
-            q.SetRR(NewRr("bla.com", "192.168.1.104"))
-            return q
-        }
-
-
-        if q.Question() == "cnnxx.com" {
-            fmt.Println("Setting to answer")
-            q.SetAnswer()
-            q.SetRaTrue()
-            //q.SetRcodeNxdomain()
-            //q.SetRcodeNotImpl()
-            q.SetRcodeNoErr()
-            q.SetAdFalse()
-
-            //rr := NewRr("cnn.com", "1.1.1.1", RrTtl(100), RrClass(CH), RrType(CNAME))
-            rr := NewRr("cnn.com", "1.1.1.1") // , RrTtl(100), RrClass(CH), RrType(CNAME))
-            q.SetRR(rr)
-
-            fmt.Printf("%+v\n", q)
-            //fmt.Printf("%b\n", q.header[3])
-            return q
-        }
-
-        if q.Question() == "decin.cz" {
-            rs := NewRrSet(
-                NewRr("first", "second", RrType(CNAME), RrTtl(10)),
-                NewRr("second", "third", RrType(CNAME), RrTtl(20)),
-                NewRr("third", "3.3.3.3", RrTtl(30)))
-
-            fmt.Printf("%+v\n", rs)
-
-            q.SetRR(rs)
-            fmt.Printf("%+v\n", q)
-
-            return q
-        }
-
-        return nil
-    })
-
-    dx.AnswerHandler(func(a *Pskel) {
-        fmt.Printf("A: %+v\n", a)
     })
     */
 

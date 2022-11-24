@@ -104,8 +104,25 @@ func (p Packet) ad(b bool) {
 //
 // RR
 
-type rr struct {
+type RR interface {
+    validate() bool
+    bytes() []byte
+}
+type Nxdomain struct {
     l1, l2 string
+    typ, ttl int
+}
+type Rdata struct {
+    l1, l2 string // l1: name, l2: resource data
+    typ, ttl int
+}
+type RRset []*RR
+
+
+
+
+type rr struct {
+    l1, l2 string // l1: name, l2: rdata
     typ, ttl int
 }
 type rrset []*rr
@@ -190,7 +207,7 @@ func run(rs rrset) []byte {
             packet[j][2] = serializeIp(r.l2, needsroot)
 
             case CNAME:
-            // offset is real position (index) of start of this label in the packet and has 3 parts
+            // currpos is real position (index) of start of this label in the packet and has 3 parts
             // 1. headers
             currpos := 0
             // 2. N+1 previous RRs
@@ -204,7 +221,6 @@ func run(rs rrset) []byte {
             currpos += len(packet[j][0])+len(packet[j][1])
             // TODO catch if this already exists as it may indicate a CNAME loop,
             // validateHostname() should catch this though..?
-            //lmap[r.l2] = offset + RDLENGTH
             lmap[r.l2] = currpos+RDLENGTH
             lm = mapLabel(r.l2, false)
 
@@ -258,12 +274,10 @@ func run(rs rrset) []byte {
     for i:=0; i<len(packet); i++ {
         for j:=0; j<len(packet[i]); j++ {
             for k:=0; k<len(packet[i][j]); k++ {
-                //fmt.Printf("%+v ", packet[i][j][k])
                 r = append(r, packet[i][j][k])
             }
         }
     }
-    //fmt.Printf("r: %+v\n", r)
     return r
 }
 func serializeIp(ip string, addroot bool) []byte {
