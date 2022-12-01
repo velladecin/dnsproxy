@@ -131,6 +131,8 @@ const (
     Q_PARTSLEN = 2      // label, type/class
     RR_PARTSLEN = 3     // label, type/class/ttl, label
     HEADERSLEN = 12
+
+    ROOT = 0            // root / '.'
 )
 
 // TYPE

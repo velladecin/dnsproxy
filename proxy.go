@@ -58,10 +58,11 @@ func NewDnsProxy(upstream ...string) (*DnsProxy, error) {
 }
 
 func (dx *DnsProxy) Handler(h func(question Packet, client net.Addr) *Packet) { dx.handler = h }
-func (dx *DnsProxy) proxy_new(question Packet, client net.Addr) {
+func (dx *DnsProxy) proxy_new(question []byte, client net.Addr) {
+    fmt.Printf("----------- %+v\n", question)
     var answer *Packet
     if dx.handler != nil {
-        answer = dx.handler(question, client)
+        answer = dx.handler(NewQueryPacket(question), client)
         fmt.Printf("proxy::answer %+v\n", answer)
     }
     // handler() can return nil when no conditions are met there
@@ -78,17 +79,21 @@ func (dx *DnsProxy) proxy_new(question Packet, client net.Addr) {
 
         // Upstream receive answer
         p := <-dx.emptyPacket
+        fmt.Println("1. =====================")
         _, err = upstream.Read(p)
+        fmt.Println("2. =====================")
         if err != nil {
             panic(err)
         }
+        fmt.Println("3. =====================")
 
-        answer = (*Packet)(&p)
+        fmt.Printf("%+v\n", p)
+        answer = NewAnswerPacket(p)
     }
 
     fmt.Printf("fansw: %+v\n", answer)
     // Downstream write (back) answer
-    _, err := dx.Listener.WriteTo(*answer, client)
+    _, err := dx.Listener.WriteTo(answer.bytes, client)
     if err != nil {
         panic(err)
     }
@@ -105,7 +110,7 @@ func (dx *DnsProxy) Accept() {
         }
 
         // offload to free the receiver
-        go dx.proxy_new(Packet(query), addr)
+        go dx.proxy_new(query, addr)
     }
 }
 

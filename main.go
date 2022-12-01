@@ -13,12 +13,6 @@ func main() {
 
     /*
     r1 := rrset{
-        &rr{"google.com", "1.1.1.1", 1, 100},
-        &rr{"google.com", "2.2.2.2", 1, 200},
-        &rr{"google.com", "3.3.3.3", 1, 300}}
-        */
-
-    r1 := rrset{
         &rr{"google.com", "velladec.org", CNAME, 10},
         &rr{"velladec.org", "velladec.in", CNAME, 20},
         &rr{"velladec.in", "1.1.1.1", A, 20},
@@ -31,14 +25,36 @@ func main() {
         &rr{"bla.com", "telemetry-incoming.r53-2.services.mozilla.com", 5, 70},
         &rr{"telemetry-incoming.r53-2.services.mozilla.com", "prod.ingestion-edge.prod.dataops.mozgcp.net", 5, 80},
         &rr{"prod.ingestion-edge.prod.dataops.mozgcp.net", "34.120.208.123", 1, 90}}
-    //r4 := rrset{
-    //    &rr{"velladec.in", "in", "nxdomain"}}
-    //fmt.Printf("r4: %+v\n", r4)
+        */
+
+    r1 := RRset{&Rdata{"google.com", "1.1.1.1", A, 100}}
+    r1.checkValid()
+    p1 := r1.GetPacket()
+
+    r2 := RRset{&Rdata{"decin.cz", "100.100.100.100", A, 150},
+                &Rdata{"decin.cz", "100.100.100.102", A, 140},
+                &Rdata{"decin.cz", "100.100.100.101", A, 130}}
+    r2.checkValid()
+    p2 := r2.GetPacket()
 
     dx.Handler(func (query Packet, client net.Addr) *Packet {
         fmt.Printf("client: ===> %+v\n", client)
         fmt.Printf("client: ===> %+v\n", client.Network())
         fmt.Printf("client: ===> %+v\n", client.String())
+        fmt.Printf("query: ====> %+v\n", query)
+
+        var answer *Packet
+        switch query.Question() {
+        case "google.com":  answer = p1
+        case "decin.cz":    answer = p2
+        }
+        if answer != nil {
+            // TODO 2 idlen should be const
+            answer.IngestPacketId(query.bytes[:2])
+        }
+        return answer
+
+        /*
         var answer *Packet
         switch query.questionString() {
         case "google.com":  answer = query.getAnswer(r1)
@@ -47,18 +63,8 @@ func main() {
         case "bla.com": answer = query.getAuthoritativeAnswer(r3)
         }
         return answer
+        */
     })
-
-/*
-    dx.Handler(func(q *Pskel) *Pskel {
-        fmt.Printf("Q: %+v\n", q)
-        fmt.Printf("q: %s\n", q.Question())
-        fmt.Printf("h1: %+v\n", q.Headers())
-        q.SetAnswer()
-        fmt.Printf("h2: %+v\n", q.Headers())
-        return q
-    })
-    */
 
     fmt.Printf("-- %+v\n", dx)
     dx.Accept()
