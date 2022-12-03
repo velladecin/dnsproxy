@@ -4,6 +4,7 @@ import (
     "fmt"
     "strings"
     "strconv"
+    "encoding/binary"
 )
 
 type LabelMap struct {
@@ -116,6 +117,51 @@ func (lm *LabelMap) extend(s string, l1 bool) {
             }
     }
 }
+func (lm *LabelMap) extendSOA(mname, rname string, serial, refresh, retry, expire, ttl int) {
+    // class/type/ttl
+    lm.typeClassTtl(SOA, IN, ttl)
+    lm.mnameRname(mname, rname)
+    lm.serialRefreshRetryExpireTtl(serial, refresh, retry, expire, ttl)
+}
+func (lm *LabelMap) mnameRname(mname, rname string) {
+    //l := MapLabel(mname)
+    //fmt.Printf("==>>>> %+v\n", l)
+
+    parts := strings.Split(mname, ".")
+    i:=0
+    for ; i<len(parts); i++ {
+        str := strings.Join(parts[i:], ".")
+        if _, ok := lm.index[str]; ok {
+            break
+        }
+    }
+
+    known := strings.Join(parts[i:], ".")
+    unknown := strings.Join(parts[:i], ".")
+    fmt.Printf("k: %s\n", known)
+    fmt.Printf("u: %s\n", unknown)
+    fmt.Printf("m: %+v\n", lm)
+
+    l := MapLabel(unknown)
+    fmt.Printf("l1: %+v\n", l)
+    l.bytes = append(l.bytes, []byte{192, byte(lm.index[known])}...)
+    fmt.Printf("l2: %+v\n", l)
+
+
+    panic("end")
+}
+func (lm *LabelMap) serialRefreshRetryExpireTtl(serial, refresh, retry, expire, ttl int) {
+    lm.bytes = append(lm.bytes,
+               append(itob(32, uint64(serial)),
+               append(itob(16, uint64(refresh)),
+               append(itob(16, uint64(retry)),
+               append(itob(16, uint64(expire)), itob(16, uint64(ttl))...)...)...)...)...)
+}
+func (lm *LabelMap) typeClassTtl(t, c, l int) {
+    lm.bytes = append(lm.bytes,
+               append(itob(16, uint64(t)),
+               append(itob(16, uint64(c)), itob(32, uint64(l))...)...)...)
+}
 
 
 //
@@ -132,6 +178,32 @@ func (lm *LabelMap) rdata(masterlen int) {
     }
 }
 func (lm *LabelMap) finalizeQuestion() {
-    // add root(.) + 2 bytes type + 2 bytes class
+    // add root(.), 2 bytes type, 2 bytes class
     lm.bytes = append(lm.bytes, []byte{ROOT, 0, A, 0, IN}...)
+    /*
+    lm.bytes = append(lm.bytes,
+               append([]byte{ROOT},
+               append(itob(16, uint64(SOA)), itob(16, uint64(IN))...)...)...)
+    */
+}
+
+func itob(size, i uint64) []byte {
+    if i > uint64(1<<size-1) {
+        panic(fmt.Sprintf("Int%d overflow: %d", size, i))
+    }
+    s := size/8
+    b := make([]byte, s)
+    switch s {
+    case 1: b[0] = uint8(i)
+    case 2: binary.LittleEndian.PutUint16(b, uint16(i)) 
+    case 4: binary.LittleEndian.PutUint32(b, uint32(i)) 
+    case 8: binary.LittleEndian.PutUint64(b, uint64(i)) 
+    default:
+        panic(fmt.Sprintf("Unsupported int size: %d", size))
+    }
+    // not sure why but PuUint produces the result in reverse
+    for i, j := 0, len(b)-1; i<j; i, j = i+1, j-1 {
+        b[i], b[j] = b[j], b[i]
+    }
+    return b
 }
