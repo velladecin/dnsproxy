@@ -134,3 +134,201 @@ incoming.telemetry.mozilla.org.	                    51  IN  CNAME	telemetry-inco
 telemetry-incoming.r53-2.services.mozilla.com.      300 IN  CNAME   telemetry-incoming-b.r53-2.services.mozilla.com.
 telemetry-incoming-b.r53-2.services.mozilla.com.    300 IN	CNAME   prod.ingestion-edge.prod.dataops.mozgcp.net.
 prod.ingestion-edge.prod.dataops.mozgcp.net.        60	IN  A       35.227.207.240
+
+
+//
+// OPT Pseudo RR - "Additional section" content
+
+    +------------+--------------+------------------------------+
+    | Field Name | Field Type   | Description                  |
+    +------------+--------------+------------------------------+
+    | NAME       | domain name  | MUST be 0 (root domain)      |
+    | TYPE       | u_int16_t    | OPT (41)                     |
+    | CLASS      | u_int16_t    | requestor's UDP payload size |
+    | TTL        | u_int32_t    | extended RCODE and flags     |
+    | RDLEN      | u_int16_t    | length of all RDATA          |
+    | RDATA      | octet stream | {attribute,value} pairs      |
+    +------------+--------------+------------------------------+
+
+    The variable part of an OPT RR may contain zero or more options in
+    the RDATA.  Each option MUST be treated as a bit field.  Each option
+    is encoded as:
+
+               +0 (MSB)                            +1 (LSB)
+    +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+ 0: |                          OPTION-CODE                          |
+    +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+ 2: |                         OPTION-LENGTH                         |
+    +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+ 4: |                                                               |
+    /                          OPTION-DATA                          /
+    /                                                               /
+    +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+
+    OPTION-CODE
+       Assigned by the Expert Review process as defined by the DNSEXT working group and the IESG.
+
+    OPTION-LENGTH
+       Size (in octets) of OPTION-DATA.
+
+    OPTION-DATA
+       Varies per OPTION-CODE.  MUST be treated as a bit field.
+
+    The extended RCODE and flags, which OPT stores in the RR Time to Live
+    (TTL) field, are structured as follows:
+
+                  +0 (MSB)                            +1 (LSB)
+    +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+ 0: |         EXTENDED-RCODE        |            VERSION            |
+    +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+ 2: | DO|                           Z                               |
+    +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+
+    EXTENDED-RCODE
+       Forms the upper 8 bits of extended 12-bit RCODE (together with the
+       4 bits defined in [RFC1035].  Note that EXTENDED-RCODE value 0
+       indicates that an unextended RCODE is in use (values 0 through
+       15).
+ 
+    VERSION
+       Indicates the implementation level of the setter.  Full
+       conformance with this specification is indicated by version '0'.
+       Requestors are encouraged to set this to the lowest implemented
+       level capable of expressing a transaction, to minimise the
+       responder and network load of discovering the greatest common
+       implementation level between requestor and responder.  A
+       requestor's version numbering strategy MAY ideally be a run-time
+       configuration option.
+       If a responder does not implement the VERSION level of the
+       request, then it MUST respond with RCODE=BADVERS.  All responses
+       MUST be limited in format to the VERSION level of the request, but
+       the VERSION of each response SHOULD be the highest implementation
+       level of the responder.  In this way, a requestor will learn the
+       implementation level of a responder as a side effect of every
+       response, including error responses and including RCODE=BADVERS.
+
+//
+// NXDomain
+
+3.3.13. SOA RDATA format
+
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /                     MNAME                     /
+    /                                               /
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /                     RNAME                     /
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                    SERIAL                     |
+    |                                               |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                    REFRESH                    |
+    |                                               |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                     RETRY                     |
+    |                                               |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                    EXPIRE                     |
+    |                                               |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                    MINIMUM                    |
+    |                                               |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+MNAME           The <domain-name> of the name server that was the
+                original or primary source of data for this zone.
+
+RNAME           A <domain-name> which specifies the mailbox of the
+                person responsible for this zone.
+
+SERIAL          The unsigned 32 bit version number of the original copy
+                of the zone.  Zone transfers preserve this value.  This
+                value wraps and should be compared using sequence space
+                arithmetic.
+
+REFRESH         A 32 bit time interval before the zone should be
+                refreshed.
+
+RETRY           A 32 bit time interval that should elapse before a
+                failed refresh should be retried.
+
+EXPIRE          A 32 bit time value that specifies the upper limit on
+                the time interval that can elapse before the zone is no
+                longer authoritative.
+
+MINIMUM         The unsigned 32 bit minimum TTL field that should be
+                exported with any RR from this zone.
+
+SOA records cause no additional section processing.
+
+
+
+
+//
+// Example
+
+### c1.velladec.in
+;; QUESTION SECTION:
+;c1.velladec.in.            IN  A
+
+;; ANSWER SECTION:
+c1.velladec.in.     10  IN  CNAME   c2.velladec.in.
+c2.velladec.in.     10  IN  CNAME   c3.velladec.in.
+c3.velladec.in.     10  IN  CNAME   decin.velladec.in.
+decin.velladec.in.  120 IN  A   103.4.16.69
+
+// headers
+9 28 129 128 0 1 0 4 0 0 0 1
+// question
+2  99 49
+8  118 101 108 108 97 100 101 99
+2  105 110
+0
+0 1 0 1
+
+// answer
+192 12 0 5 0 1 0 0 0 10
+ 0 5 2 99 50 192 15
+192 44 0 5 0 1 0 0 0 10
+ 0 5 2 99 51 192 15
+192 61 0 5 0 1 0 0 0 10
+ 0 8 5 100 101 99 105 110 192 15
+192 78 0 1 0 1 0 0 0 120
+ 0 4 103 4 16 69 0
+// additional section
+ 0 41 2 0 0 0 0
+
+----> c3.velladec.in <> decin.velladec.in | decin.velladec.in <> 103.4.16.69
+MATCH: map[1:map[0:[c3 velladec in]] 2:map[0:[velladec in]] 3:map[2:[decin velladec in]] 4:map[]]
+&{l1:c3.velladec.in l2:decin.velladec.in typ:5}
+appending: 1: map[0:[c3 velladec in]]
+doing CNAME
++appending: 2: map[0:[velladec in]] <> decin.velladec.in
+&{l1:decin.velladec.in l2:103.4.16.69 typ:1}
+appending: 3: map[2:[decin velladec in]]
+doing A
++appending: 4: map[] <> 103.4.16.69
+--- [3 49 48 51 1 52 2 49 54 2 54 57]
+[2 99 51 8 118 101 108 108 97 100 101 99 2 105 110 0 0 1 0 1]
+
+
+-----------------------------------------------
+
+;; QUESTION SECTION:
+;incoming.telemetry.mozilla.org.	IN	A
+
+;; ANSWER SECTION:
+incoming.telemetry.mozilla.org.	18 IN	CNAME	telemetry-incoming.r53-2.services.mozilla.com.
+telemetry-incoming.r53-2.services.mozilla.com. 129 IN CNAME prod.ingestion-edge.prod.dataops.mozgcp.net.
+prod.ingestion-edge.prod.dataops.mozgcp.net. 18	IN A 34.120.208.123
+
+A: &{header:[160 229 129 128 0 1 0 3 0 0 0 1]
+     question:[8 105 110 99 111 109 105 110 103 9 116 101 108 101 109 101 116 114 121 7 109 111 122 105 108 108 97 3 111 114 103 0 0 1 0 1] pos: 47
+     footer:[0 0 41 2 0 0 0 0 0 0 0]
+rr:[                                                              pos 70                                                                pos 90                               pos 100
+ [192 12 0 5 0 1 0 0 0 24 0 47 18 116 101 108 101 109 101 116 114 121 45 105 110 99 111 109 105 110 103 5 114 53 51 45 50 8 115 101 114 118 105 99 101 115 7 109 111 122 105 108 108 97 3 99 111 109 0] pos: 106
+       pos 110                                                      pos 130                                                                  pos 150                            pos 160
+ [192 60 0 5 0 1 0 0 0 84 0 45 4 112 114 111 100 14 105 110 103 101 115 116 105 111 110 45 101 100 103 101 4 112 114 111 100 7 100 97 116 97 111 112 115 6 109 111 122 103 99 112 3 110 101 116 0] pos: 163
+              pos 170
+ [192 119 0 1 0 1 0 0 0 24 0 4 34 120 208 123]
+   ]
+}

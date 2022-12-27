@@ -80,66 +80,6 @@ func (p *Packet) Question() string {
     }
     return q
 }
-func (p *Packet) IngestPacketId(id []byte) {
-    if len(id) != 2 {
-        panic(fmt.Sprintf("Invalid packet ID length: %d", len(id)))
-    }
-    fmt.Printf("%+v\n", p)
-    p.bytes[0] = id[0]
-    p.bytes[1] = id[1]
-
-    // TODO getInt()
-    if p.bytes[0] == 0 && p.bytes[1] == 0 {
-        panic("Invalid packet ID: 0")
-    }
-}
-// query type - question/answer
-func (p *Packet) SetAnswer() { p.bytes[Flags1] |= (1<<QR) }
-// counts
-func (p *Packet) SetQDcount(i int) {
-    p.bytes[QDcount1] = 0
-    p.bytes[QDcount2] = 1
-}
-func (p *Packet) SetANcount(i int) {
-    p.bytes[ANcount1] = 0
-    p.bytes[ANcount2] = byte(i)
-}
-// authoritative answer
-func (p *Packet) UnsetAA() { p.aa(false) }
-func (p *Packet) SetAA()   { p.aa(true) }
-func (p *Packet) aa(b bool) {
-    p.bytes[Flags1] |= (1<<AA)      // set
-    if ! b {
-        p.bytes[Flags1] ^= (1<<AA)  // unset
-    }
-}
-// recursion
-func (p *Packet) UnsetRD() { p.rd(false) }
-func (p *Packet) SetRD()   { p.rd(true) }
-func (p *Packet) rd(b bool) {
-    p.bytes[Flags1] |= (1<<RD)
-    if ! b {
-        p.bytes[Flags1] ^= (1<<RD)
-    }
-}
-func (p *Packet) UnsetRA() { p.ra(false) }
-func (p *Packet) SetRA()   { p.ra(true) }
-func (p *Packet) ra(b bool) {
-    p.bytes[Flags2] |= (1<<RA)
-    if ! b {
-        p.bytes[Flags2] ^= (1<<RA)
-    }
-}
-// authentic data
-func (p *Packet) UnsetAD() { p.ad(false) }
-func (p *Packet) SetAD()   { p.ad(true) }
-func (p *Packet) ad(b bool) {
-    p.bytes[Flags2] |= (1<<AD)
-    if ! b {
-        p.bytes[Flags2] ^= (1<<AD)
-    }
-}
-
 
 const (
     RDATA = iota + 1
@@ -157,7 +97,26 @@ func (rs RRset) GetPacket() *Packet { // this is run()
             p.SetRA()
         case NOTFOUND:
             p = rs.notfound()
+            p.SetAnswer()
+            p.SetRD()
+            p.SetRA()
+            p.SetQDcount(1)
+            p.SetNxdomain()
+            p.SetNScount(1)
             fmt.Println(">>>>>> NXDOMAIN")
+            /*
+; <<>> DiG 9.16.33 <<>> @localhost kdk.google.com
+;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 60855
+;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 512
+;; QUESTION SECTION:
+;kdk.google.com.            IN  A
+
+;; AUTHORITY SECTION:
+google.com.     60  IN  SOA ns1.google.com. dns-admin.google.com. 491868622 900 900 1800 60
+            */
     }
     return p
 }
@@ -223,10 +182,13 @@ func (rs RRset) notfound() *Packet {
     // label map question
     lm := MapLabel(l1)
     lm.finalizeQuestion()
-    fmt.Printf("1: NFlm: %+v\n", lm)
+    //fmt.Printf("1: NFlm: %+v\n", lm)
+    // TODO get the l1.suffix version of the question
     lm.extend("google.com", true)
-    fmt.Printf("2: NFlm: %+v\n", lm)
+    lm.typeClassTtl(SOA, IN, ttl)
+    //fmt.Printf("2: NFlm: %+v\n", lm)
     lm.extendSOA(mname, rname, serial, refresh, retry, expire, ttl)
+    lm.bytes = append(lm.bytes, byte(0))
     fmt.Printf("3: NFlm: %+v\n", lm)
 
     p := &Packet{append(make([]byte, HEADERSLEN), lm.bytes...)}
@@ -333,5 +295,103 @@ func (rs RRset) CheckValid() {
         default:
             panic(fmt.Sprintf("Unsupported type: %+v\n", reflect.TypeOf(r).String()))
         }
+    }
+}
+
+
+//
+// Headers
+
+func (p *Packet) IngestPacketId(id []byte) {
+    if len(id) != 2 {
+        panic(fmt.Sprintf("Invalid packet ID length: %d", len(id)))
+    }
+    fmt.Printf("%+v\n", p)
+    p.bytes[0] = id[0]
+    p.bytes[1] = id[1]
+
+    // TODO getInt()
+    if p.bytes[0] == 0 && p.bytes[1] == 0 {
+        panic("Invalid packet ID: 0")
+    }
+}
+// query type - question/answer
+func (p *Packet) SetAnswer() { p.bytes[Flags1] |= (1<<QR) }
+// counts
+func (p *Packet) SetQDcount(i int) {
+    p.bytes[QDcount1] = 0
+    p.bytes[QDcount2] = 1
+}
+func (p *Packet) SetANcount(i int) {
+    p.bytes[ANcount1] = 0
+    p.bytes[ANcount2] = byte(i)
+}
+func (p *Packet) SetNScount(i int) {
+    p.bytes[NScount1] = 0
+    p.bytes[NScount2] = byte(i)
+}
+// authoritative answer
+func (p *Packet) UnsetAA() { p.aa(false) }
+func (p *Packet) SetAA()   { p.aa(true) }
+func (p *Packet) aa(b bool) {
+    p.bytes[Flags1] |= (1<<AA)      // set
+    if ! b {
+        p.bytes[Flags1] ^= (1<<AA)  // unset
+    }
+}
+// recursion
+func (p *Packet) UnsetRD() { p.rd(false) }
+func (p *Packet) SetRD()   { p.rd(true) }
+func (p *Packet) rd(b bool) {
+    p.bytes[Flags1] |= (1<<RD)
+    if ! b {
+        p.bytes[Flags1] ^= (1<<RD)
+    }
+}
+func (p *Packet) UnsetRA() { p.ra(false) }
+func (p *Packet) SetRA()   { p.ra(true) }
+func (p *Packet) ra(b bool) {
+    p.bytes[Flags2] |= (1<<RA)
+    if ! b {
+        p.bytes[Flags2] ^= (1<<RA)
+    }
+}
+// authentic data
+func (p *Packet) UnsetAD() { p.ad(false) }
+func (p *Packet) SetAD()   { p.ad(true) }
+func (p *Packet) ad(b bool) {
+    p.bytes[Flags2] |= (1<<AD)
+    if ! b {
+        p.bytes[Flags2] ^= (1<<AD)
+    }
+}
+// RCODE
+func (p *Packet) SetNxdomain() { p.SetRcode(NXDOMAIN) }
+func (p *Packet) SetRcode(i uint8) {
+    if i > NAME_NOT_IN_ZONE {
+        panic(fmt.Sprintf("RCODE not supported: %d", i))
+    }
+
+    //p.unsetBitInByte(Flags2, RCODE...)
+    // this should be as clean as whistle
+    // therefore only set
+    p.bytes[Flags2] |= i
+}
+
+
+func (p *Packet) unsetBitInByte(byt uint8, bit ...uint8) {
+    if len(bit) == 0 {
+        return
+    }
+
+    for _, b := range bit {
+        if b > 7 {
+            panic(fmt.Sprintf("0-7 bit indexes in byte, got: %d", b))
+        }
+
+        // p[byt] will bomb out
+        // if byt is not valid index
+        p.bytes[byt] |= (1<<b)
+        p.bytes[byt] ^= (1<<b)
     }
 }

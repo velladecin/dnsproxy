@@ -51,7 +51,7 @@ func main() {
         switch query.Question() {
         case "google.com":  answer = p1
         case "decin.cz":    answer = p2
-        case "kdk.googe.com": answer = p3
+        case "kdk.google.com": answer = p3
         }
         if answer != nil {
             // TODO 2 idlen should be const
