@@ -20,6 +20,13 @@ package main
     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 */
 
+// ID
+const (
+    Id1 = iota
+    Id2
+    IDLEN
+)
+
 // Flags byte[2,3]
 const (
     Flags1 = iota + 2

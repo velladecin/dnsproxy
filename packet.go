@@ -195,6 +195,35 @@ func (rs RRset) notfound() *Packet {
     return p
 
     /*
+
+62 32 129 131 0 1 0 0 0 1 0 1
+// question
+34 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 3 120 120 120 0 0 1 0 1
+// auth class/type/ttl
+192 47 0 6 0 1 0 0 3 132
+// 2b length
+// SOA (mname, rname, ...)
+0 49 1 97 3 110 105 99 192 47 5 97 100 109 105 110 5 116 108 100 110 115 7 103 111 100 97 100 100 121 0 99 170 69 211 0 0 7 8 0 0 1 44 0 9 58 128 0 0 7 8 0 0 41 2 0 0 0 0 0 
+
+
+vella@vella ~/git/github/dnsproxy $ dig xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxx
+
+; <<>> DiG 9.16.33 <<>> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxx
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 40341
+;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 512
+;; QUESTION SECTION:
+;xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxx.	IN A
+
+;; AUTHORITY SECTION:
+xxx.			900	IN	SOA	a.nic.xxx. admin.tldns.godaddy. 1672103379 1800 300 604800 1800
+
+
+=====================================================================================================
 [237 183 129 131 0 1 0 0 0 1 0 1
     // question
   3 107 100 107 6 103 111 111 103 108 101 3 99 111 109 0 0 1 0 1
@@ -303,15 +332,15 @@ func (rs RRset) CheckValid() {
 // Headers
 
 func (p *Packet) IngestPacketId(id []byte) {
-    if len(id) != 2 {
+    if len(id) != IDLEN {
         panic(fmt.Sprintf("Invalid packet ID length: %d", len(id)))
     }
     fmt.Printf("%+v\n", p)
-    p.bytes[0] = id[0]
-    p.bytes[1] = id[1]
+    p.bytes[Id1] = id[Id1]
+    p.bytes[Id2] = id[Id2]
 
-    // TODO getInt()
-    if p.bytes[0] == 0 && p.bytes[1] == 0 {
+    // TODO return error instead of crashing to allow proxy to keep working(?)
+    if p.bytes[Id1] == 0 && p.bytes[Id2] == 0 {
         panic("Invalid packet ID: 0")
     }
 }

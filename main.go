@@ -30,6 +30,7 @@ func main() {
     r1 := RRset{&Rdata{"google.com", "1.1.1.1", A, 100}}
     r1.CheckValid()
     p1 := r1.GetPacket()
+    fmt.Printf("%+v\n", p1)
 
     r2 := RRset{&Rdata{"decin.cz", "100.100.100.100", A, 150},
                 &Rdata{"decin.cz", "100.100.100.102", A, 140},
@@ -37,7 +38,8 @@ func main() {
     r2.CheckValid()
     p2 := r2.GetPacket()
 
-    r3 := RRset{&Nxdomain{l1:"kdk.google.com"}}
+    //r3 := RRset{&Nxdomain{l1:"google.com", mname: "ns1.google.com", rname: "vella.vella.org"}}
+    r3 := RRset{&Nxdomain{l1:"google.com", mname: "bla.google.biz", rname: "dns-master.karel.org"}}
     r3.CheckValid()
     p3 := r3.GetPacket()
 
@@ -49,13 +51,12 @@ func main() {
 
         var answer *Packet
         switch query.Question() {
-        case "google.com":  answer = p1
+        //case "google.com":  answer = p1
         case "decin.cz":    answer = p2
-        case "kdk.google.com": answer = p3
+        case "google.com": answer = p3
         }
         if answer != nil {
-            // TODO 2 idlen should be const
-            answer.IngestPacketId(query.bytes[:2])
+            answer.IngestPacketId(query.bytes[:IDLEN])
         }
         return answer
 
