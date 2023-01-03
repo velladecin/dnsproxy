@@ -116,7 +116,13 @@ func (lm *LabelMap) extend(s string, l1 bool) {
     }
 }
 func (lm *LabelMap) extendSOA(mname, rname string, serial, refresh, retry, expire, ttl int) {
+    // local byte array to hold the resulting bytes
+    // we need this to be able to tell the total length of SOA
     b := make([]byte, 0)
+
+    // decide if and what parts of these are known and/or uknown
+    // either of the two (known/unknown) can be an empty string (or not)
+    // and the switch further down decides which is to be used and when
     for _, s := range []string{mname, rname} {
         parts := strings.Split(s, ".")
         i:=0
@@ -129,75 +135,63 @@ func (lm *LabelMap) extendSOA(mname, rname string, serial, refresh, retry, expir
 
         known := strings.Join(parts[i:], ".")
         unknown := strings.Join(parts[:i], ".")
-        //fmt.Printf("k: %s\n", known)
-        //fmt.Printf("u: %s\n", unknown)
-        //fmt.Printf("m1: %+v\n", lm)
+
+        // i == 0
+        //  is full match with only known part and will need label pointer
+        // i == len(parts)
+        //  is no match with no known part and will need full byte definition
+        // i == X
+        //  is partial match with both known+unknown parts and will need byte definition and label pointer
 
         switch i {
-        // full match - no unknown
         case 0:
-            fmt.Println("FULL MATCH")
-            lm.bytes = append(lm.bytes, []byte{COMPRESSED_LABEL, byte(lm.index[known])}...)
-        // no match - no known
-        case len(parts):
-            fmt.Println("NO MATCH")
-            l := MapLabel(unknown)
-            fmt.Print("%+v\n", l)
-            /*
-                l := MapLabel(unknown)
-                l.rdata(len(lm.bytes))
-                lm.bytes = append(lm.bytes, l.bytes...)
-                for k, v := range l.index {
-                    lm.index[k] = v
-                }
-            */
-        // partial match - both known+unknown
+            b = append(b, []byte{COMPRESSED_LABEL, byte(lm.index[known])}...)
         default:
-            //fmt.Printf("1. lm in loo: %+v\n", lm)
-            //fmt.Printf("1. lm in loo len: %d\n", len(lm.bytes))
-
-            //fmt.Println("PARTIAL MATCH")
-            // label up the unknown
             l := MapLabel(unknown)
             // update global indexes
             for part, pos := range l.index {
-                lm.index[fmt.Sprintf("%s.%s", part, known)] = len(lm.bytes)+pos+len(b)+2 // extra 2 bytes of total length, see below
+                var idxkey string
+                if i == len(parts) {
+                    idxkey = part
+                } else {
+                    idxkey = fmt.Sprintf("%s.%s", part, known)
+                }
+
+                lm.index[idxkey] = len(lm.bytes)+pos+len(b)+2 // extra 2 bytes of total length
             }
-            // save the results
+
+            // save the result
             b = append(b, l.bytes...)
-            b = append(b, []byte{COMPRESSED_LABEL, byte(lm.index[known])}...)
-            //fmt.Printf("2. b: %+v\n", b)
-            //fmt.Printf("2. lm in loo: %+v\n", lm)
-            //fmt.Printf("2. lm in loo len: %d\n", len(lm.bytes))
+            if i == len(parts) {
+                // add '.' root
+                b = append(b, []byte{0}...)
+            } else {
+                // add label pointer
+                b = append(b, []byte{COMPRESSED_LABEL, byte(lm.index[known])}...)
+            }
         }
-        //fmt.Printf("m2: %+v\n", lm)
-        //fmt.Printf("m2 byte len: %d\n", len(lm.bytes))
-        //panic("end 1")
         fmt.Println("==============")
     }
 
     // update lm.bytes with the full SOA byte slice
-    // 2 bytes of total length of len(b) + 20 bytes (serial, .. below)
+    // 2 bytes of total length: len(b) + 20 bytes (serial, .. below)
     lm.bytes = append(lm.bytes,
-               append(itob(16, uint64(len(b)+20)), b...)...)
+               append(itobs(16, uint64(len(b)+20)), b...)...)
 
     // append serial, refresh, retry, expire, ttl
     lm.serialRefreshRetryExpireTtl(serial, refresh, retry, expire, ttl)
-    // TODO remove below
-    //lm.serialRefreshRetryExpireTtl(491868622, 900, 900, 1800, 60)
-    //fmt.Printf("FINAL: %+v\n", lm)
 }
 func (lm *LabelMap) serialRefreshRetryExpireTtl(serial, refresh, retry, expire, ttl int) {
     lm.bytes = append(lm.bytes,
-               append(itob(32, uint64(serial)),
-               append(itob(32, uint64(refresh)),
-               append(itob(32, uint64(retry)),
-               append(itob(32, uint64(expire)), itob(32, uint64(ttl))...)...)...)...)...)
+               append(itobs(32, uint64(serial)),
+               append(itobs(32, uint64(refresh)),
+               append(itobs(32, uint64(retry)),
+               append(itobs(32, uint64(expire)), itobs(32, uint64(ttl))...)...)...)...)...)
 }
 func (lm *LabelMap) typeClassTtl(t, c, l int) {
     lm.bytes = append(lm.bytes,
-               append(itob(16, uint64(t)),
-               append(itob(16, uint64(c)), itob(32, uint64(l))...)...)...)
+               append(itobs(16, uint64(t)),
+               append(itobs(16, uint64(c)), itobs(32, uint64(l))...)...)...)
 }
 
 
@@ -215,17 +209,11 @@ func (lm *LabelMap) rdata(masterlen int) {
     }
 }
 func (lm *LabelMap) finalizeQuestion() {
-    // add root(.), 2 bytes type, 2 bytes class
+    // add root(.), 2 bytes each of type, class
     lm.bytes = append(lm.bytes, []byte{ROOT, 0, A, 0, IN}...)
-    /*
-    lm.bytes = append(lm.bytes,
-               append([]byte{ROOT},
-               append(itob(16, uint64(SOA)), itob(16, uint64(IN))...)...)...)
-    */
 }
-
 // integer to byte slice
-func itob(size, i uint64) []byte {
+func itobs(size, i uint64) []byte {
     if i > uint64(1<<size-1) {
         panic(fmt.Sprintf("Int%d overflow: %d", size, i))
     }
