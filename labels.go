@@ -11,16 +11,19 @@ type LabelMap struct {
     bytes []byte
     index map[string]int
 }
-
+// splice hostname by each label (separated by '.')
+// and record position index of each of those in the resulting byte slice
 func MapLabel(s string) *LabelMap {
+    // +1 for length at the beginning of first label
+    // google . com = 6 google 3 com
     m := make(map[string]int)
-    b := make([]byte, len(s)+1) // byte index is +1 for extra byte (length) at beginning of first label
+    b := make([]byte, len(s)+1)
 
     l:=0
     for i:=len(s)-1; i>=0; i-- {
         if s[i] == '.' {
             // s[i+1:] to not include '.' (.com vs com)
-            m[s[i+1:]] = i+1+QUESTION_LABEL_START
+            m[s[i+1:]] = QUESTION_LABEL_START+i+1
             b[i+1] = byte(l)
             l=0
             continue
@@ -35,23 +38,80 @@ func MapLabel(s string) *LabelMap {
 
     return &LabelMap{b, m}
 }
+// add formatted IP to byte slice
+// nothing to add to indexes
 func (lm *LabelMap) extendIp(ip string) {
-    // 2 bytes rdlength
-    // 4 bytes IPv4
+    // 2 bytes rdlength, 4 bytes ipv4
     b := make([]byte, 6)
     b[1] = 4
     for i, octet := range strings.Split(ip, ".") {
         o, _ := strconv.Atoi(octet)
         b[i+2] = byte(o)
     }
-    // nothing to add to index
     lm.bytes = append(lm.bytes, b...)
+}
+func (lm *LabelMap) extendRR(l1, l2 string, typ, class, ttl int) {
+    // l1 is always pointer
+    lm.bytes = append(lm.bytes, []byte{COMPRESSED_LABEL, byte(lm.index[l1])}...)
+    // type, class, ttl
+    lm.typeClassTtl(typ, class, ttl)
+    // build l2
+    switch typ {
+    case A:
+        lm.extendIp(l2)
+    case CNAME:
+        parts := strings.Split(l2, ".")
+        i:=0
+        for ; i<len(parts); i++ {
+            str := strings.Join(parts[i:], ".")
+            if _, ok := lm.index[str]; ok {
+                break
+            }
+        }
+
+        if i == 0 {
+            panic(fmt.Sprintf("L2 has full label match - this is baad: %s", l2))
+        }
+
+        known := strings.Join(parts[i:], ".")
+        unknown := strings.Join(parts[:i], ".")
+
+        l := MapLabel(unknown)
+        // update global indexes
+        for part, pos := range l.index {
+            var idxkey string
+            if i == len(parts) {
+                idxkey = part
+            } else {
+                idxkey = fmt.Sprintf("%s.%s", part, known)
+            }
+
+            lm.index[idxkey] = len(lm.bytes)+pos+2 // extra 2 bytes of total length
+        }
+        // when nothing is known we need to add root
+        // otherwise label pointer
+
+        if i == len(parts) {
+            // add '.' root
+            l.bytes = append(l.bytes, []byte{0}...)
+        } else {
+            l.bytes = append(l.bytes, []byte{COMPRESSED_LABEL, byte(lm.index[known])}...)
+        }
+        // now prepend rdlength
+        fmt.Printf("*************: %d\n", len(l.bytes))
+        l.bytes = append(itobs(16, uint64(len(l.bytes))), l.bytes...)
+        // now chuck it to global bytes
+        lm.bytes = append(lm.bytes, l.bytes...)
+    default:
+        panic(fmt.Sprintf("DNS type not supported: %d", typ))
+    }
 }
 
 // l1 is always a pointer
 // l2 can be IP addr (A) or
 //    can be another label (CNAME) in which case can also be partial match
-func (lm *LabelMap) extend(s string, l1 bool) {
+//func (lm *LabelMap) extend(s string, l1 bool) {
+func (lm *LabelMap) extend(s string) {
     parts := strings.Split(s, ".")
     i:=0
     for ; i<len(parts); i++ {
@@ -72,18 +132,22 @@ func (lm *LabelMap) extend(s string, l1 bool) {
         // example.com CNAME cname.example.com
         // cname.example.com A 1.1.1.1
         case 0:
+        /*
             if ! l1 {
                 panic(fmt.Sprintf("L2 has full match and that should not happen: %s", known))
             }
+            */
             lm.bytes = append(lm.bytes, []byte{192, byte(lm.index[known])}...)
 
         // no match - can only be 2nd label
         // example.com CNAME otherexample.org
         // otherexample.org A 1.1.1.1
         case len(parts):
+        /*
             if l1 {
                 panic(fmt.Sprintf("L1 has no match and that should not happen: %s", unknown))
             }
+            */
             l := MapLabel(unknown)
             l.rdata(len(lm.bytes))
             lm.bytes = append(lm.bytes, l.bytes...)
@@ -95,9 +159,11 @@ func (lm *LabelMap) extend(s string, l1 bool) {
         // www.example.com CNAME example.com
         // example.com A 1.1.1.1
         default:
+        /*
             if l1 {
                 panic(fmt.Sprintf("L1 has partial match and that should not happen: %s/%s", known, unknown))
             }
+            */
             l := MapLabel(unknown)
             // create pointer to what we known
             l.bytes = append(l.bytes, []byte{192, byte(lm.index[known])}...)

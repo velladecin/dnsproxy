@@ -39,9 +39,15 @@ func main() {
     p2 := r2.GetPacket()
 
     //r3 := RRset{&Nxdomain{l1:"google.com", mname: "ns1.google.com", rname: "vella.vella.org"}}
-    r3 := RRset{&Nxdomain{l1:"google.com", mname: "bla.google.biz", rname: "dns-master.karel.org"}}
+    r3 := RRset{&Nxdomain{l1:"karel.cz", mname: "ns1.nano.cz", rname: "dns.nano.cz"}}
     r3.CheckValid()
     p3 := r3.GetPacket()
+
+    r4 := RRset{&Rdata{"neco.cz", "second.org", CNAME, 10},
+                &Rdata{"second.org", "third.cz", CNAME, 20},
+                &Rdata{"third.cz", "1.2.3.4", A, 30}}
+    r4.CheckValid()
+    p4 := r4.GetPacket()
 
     dx.Handler(func (query Packet, client net.Addr) *Packet {
         fmt.Printf("client: ===> %+v\n", client)
@@ -52,8 +58,10 @@ func main() {
         var answer *Packet
         switch query.Question() {
         //case "google.com":  answer = p1
+        case "google.com":  answer = p1
         case "decin.cz":    answer = p2
-        case "google.com": answer = p3
+        case "karel.cz":    answer = p3
+        case "neco.cz":     answer = p4
         }
         if answer != nil {
             answer.IngestPacketId(query.bytes[:IDLEN])

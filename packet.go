@@ -147,16 +147,7 @@ func (rs RRset) rdata() *Packet {
             lm.finalizeQuestion()
         }
 
-        // 1st label
-        lm.extend(l1, true)
-        // type, class, ttl
-        //lm.bytes = append(lm.bytes, []byte{0, byte(typ), 0, IN, 0, 0, 0, byte(ttl)}...)
-        lm.typeClassTtl(typ, IN, ttl)
-        // 2nd label
-        switch typ {
-        case A: lm.extendIp(l2)
-        case CNAME: lm.extend(l2, false)
-        }
+        lm.extendRR(l1, l2, typ, IN, ttl)
     }
 
     // add headers
@@ -184,7 +175,8 @@ func (rs RRset) notfound() *Packet {
     lm.finalizeQuestion()
     //fmt.Printf("1: NFlm: %+v\n", lm)
     // TODO get the l1.suffix version of the question
-    lm.extend("google.com", true)
+    //lm.extend("google.com", true)
+    lm.extend("google.com")
     lm.typeClassTtl(SOA, IN, ttl)
     //fmt.Printf("2: NFlm: %+v\n", lm)
     lm.extendSOA(mname, rname, serial, refresh, retry, expire, ttl)
