@@ -3,6 +3,8 @@ package main
 import (
     "fmt"
     "reflect"
+    "strings"
+    "time"
 )
 
 type RR interface {
@@ -22,32 +24,47 @@ func (rd *Rdata) defaults() {
 }
 
 type Nxdomain struct {
-    l1, mname, rname string
+    // DNS question to which we return nxdomain
+    // can be a.com or *.a.com (TODO)
+    question string
+
+    // authority giving the answer
+    // defaults to the last question label and will be ignored even if explicitly defined
+    authority string
+
+    // mname - source server
+    // rname - responsible mailbox
+    mname, rname string
+
+    // as expected
     serial, refresh, retry, expire, ttl int
 }
-// TODO fix this int values
 func (nx *Nxdomain) defaults() {
+    // question is given, authority is determined from question
+    // update what else needs it
+    parts := strings.Split(nx.question, ".")
+    nx.authority = parts[len(parts)-1]
+
     if nx.mname == "" {
-        nx.mname = "ns1.google.com"
+        nx.mname = "ns1.versig." + nx.authority
     }
     if nx.rname == "" {
-        nx.rname = "dns-admin.google.com"
+        nx.rname = "dns-admin.versig." + nx.authority
     }
-    // don't do anything with l1 which must be given by user
     if nx.serial == 0 {
-        nx.serial = 100
+        nx.serial = int(time.Now().Unix()) // very long time before it overflows
     }
     if nx.refresh == 0 {
-        nx.refresh = 90
+        nx.refresh = 900
     }
     if nx.retry == 0 {
-        nx.retry = 80
+        nx.retry = 300
     }
     if nx.expire == 0 {
-        nx.expire = 70
+        nx.expire = 604800
     }
     if nx.ttl == 0 {
-        nx.ttl = 60
+        nx.ttl = 900
     }
 }
 
@@ -103,20 +120,6 @@ func (rs RRset) GetPacket() *Packet { // this is run()
             p.SetQDcount(1)
             p.SetNxdomain()
             p.SetNScount(1)
-            fmt.Println(">>>>>> NXDOMAIN")
-            /*
-; <<>> DiG 9.16.33 <<>> @localhost kdk.google.com
-;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 60855
-;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1
-
-;; OPT PSEUDOSECTION:
-; EDNS: version: 0, flags:; udp: 512
-;; QUESTION SECTION:
-;kdk.google.com.            IN  A
-
-;; AUTHORITY SECTION:
-google.com.     60  IN  SOA ns1.google.com. dns-admin.google.com. 491868622 900 900 1800 60
-            */
     }
     return p
 }
@@ -141,10 +144,9 @@ func (rs RRset) rdata() *Packet {
         typ := int(ri.FieldByName("typ").Int())
         ttl := int(ri.FieldByName("ttl").Int())
 
-        // build question only once
+        // question
         if i == 0 {
-            lm = MapLabel(l1)
-            lm.finalizeQuestion()
+            lm = MapLabelQuestion(l1)
         }
 
         lm.extendRR(l1, l2, typ, IN, ttl)
@@ -159,7 +161,8 @@ func (rs RRset) rdata() *Packet {
 }
 func (rs RRset) notfound() *Packet {
     ri := reflect.Indirect(reflect.ValueOf(rs[0])) // nxdomain has only one member
-    l1 := ri.FieldByName("l1").String()
+    q := ri.FieldByName("question").String()
+    auth := ri.FieldByName("authority").String()
     mname := ri.FieldByName("mname").String()
     rname := ri.FieldByName("rname").String()
     serial := int(ri.FieldByName("serial").Int())
@@ -167,77 +170,21 @@ func (rs RRset) notfound() *Packet {
     retry := int(ri.FieldByName("retry").Int())
     expire := int(ri.FieldByName("expire").Int())
     ttl := int(ri.FieldByName("ttl").Int())
-    fmt.Printf("NotFound: %s <> %s <> %s <> %d <> %d <> %d <> %d <> %d\n",
-                    l1, mname, rname, serial, refresh, retry, expire, ttl)
+    fmt.Printf("NotFound: %s <> %s <> %s <> %s <> %d <> %d <> %d <> %d <> %d\n", q, auth, mname, rname, serial, refresh, retry, expire, ttl)
 
-    // label map question
-    lm := MapLabel(l1)
-    lm.finalizeQuestion()
-    //fmt.Printf("1: NFlm: %+v\n", lm)
-    // TODO get the l1.suffix version of the question
-    //lm.extend("google.com", true)
-    lm.extend("google.com")
+    // question
+    lm := MapLabelQuestion(q)
+    // auth
+    lm.bytes = append(lm.bytes, []byte{COMPRESSED_LABEL, byte(lm.index[auth])}...)
+    // type, class, ttl
     lm.typeClassTtl(SOA, IN, ttl)
-    //fmt.Printf("2: NFlm: %+v\n", lm)
+    // SOA
     lm.extendSOA(mname, rname, serial, refresh, retry, expire, ttl)
     lm.bytes = append(lm.bytes, byte(0))
     fmt.Printf("3: NFlm: %+v\n", lm)
 
     p := &Packet{append(make([]byte, HEADERSLEN), lm.bytes...)}
     return p
-
-    /*
-
-62 32 129 131 0 1 0 0 0 1 0 1
-// question
-34 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 120 3 120 120 120 0 0 1 0 1
-// auth class/type/ttl
-192 47 0 6 0 1 0 0 3 132
-// 2b length
-// SOA (mname, rname, ...)
-0 49 1 97 3 110 105 99 192 47 5 97 100 109 105 110 5 116 108 100 110 115 7 103 111 100 97 100 100 121 0 99 170 69 211 0 0 7 8 0 0 1 44 0 9 58 128 0 0 7 8 0 0 41 2 0 0 0 0 0 
-
-
-vella@vella ~/git/github/dnsproxy $ dig xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxx
-
-; <<>> DiG 9.16.33 <<>> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxx
-;; global options: +cmd
-;; Got answer:
-;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 40341
-;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1
-
-;; OPT PSEUDOSECTION:
-; EDNS: version: 0, flags:; udp: 512
-;; QUESTION SECTION:
-;xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxx.	IN A
-
-;; AUTHORITY SECTION:
-xxx.			900	IN	SOA	a.nic.xxx. admin.tldns.godaddy. 1672103379 1800 300 604800 1800
-
-
-=====================================================================================================
-[237 183 129 131 0 1 0 0 0 1 0 1
-    // question
-  3 107 100 107 6 103 111 111 103 108 101 3 99 111 109 0 0 1 0 1
-    // auth class/type/ttl
-  192 16 0 6 0 1 0 0 0 60
-    // 2byte total length
-    // mname
-    // rname
-  0 38 3 110 115 49 192 16 9 100 110 115 45 97 100 109 105 110 192 16 29 81 81 206 0 0 3 132 0 0 3 132 0 0 7 8 0 0 0 60 0 0 41 2 0 0 0 0 0 0 ]
-
-; <<>> DiG 9.16.33 <<>> @localhost kdk.google.com
-;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 60855
-;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1
-
-;; OPT PSEUDOSECTION:
-; EDNS: version: 0, flags:; udp: 512
-;; QUESTION SECTION:
-;kdk.google.com.            IN  A
-
-;; AUTHORITY SECTION:
-google.com.     60  IN  SOA ns1.google.com. dns-admin.google.com. 491868622 900 900 1800 60
-  */
 }
 func (rs RRset) CheckValid() {
     for i, r := range rs {
@@ -293,7 +240,8 @@ func (rs RRset) CheckValid() {
             }
 
         case "*main.Nxdomain":
-            l1 := v.FieldByName("l1").String()
+            q := v.FieldByName("question").String()
+            auth := v.FieldByName("auth").String()
             mname := v.FieldByName("mname").String()
             rname := v.FieldByName("rname").String()
             serial := int(v.FieldByName("serial").Int())
@@ -302,7 +250,7 @@ func (rs RRset) CheckValid() {
             expire := int(v.FieldByName("expire").Int())
             ttl := int(v.FieldByName("ttl").Int())
 
-            for k, v := range map[string]string{"l1":l1, "mname":mname, "rname":rname} {
+            for k, v := range map[string]string{"question":q, "authority":auth, "mname":mname, "rname":rname} {
                 if v == "" {
                     panic(fmt.Sprintf("Invalid %s: ''(empty)", k))
                 }

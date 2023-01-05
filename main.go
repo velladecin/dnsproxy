@@ -38,8 +38,7 @@ func main() {
     r2.CheckValid()
     p2 := r2.GetPacket()
 
-    //r3 := RRset{&Nxdomain{l1:"google.com", mname: "ns1.google.com", rname: "vella.vella.org"}}
-    r3 := RRset{&Nxdomain{l1:"karel.cz", mname: "ns1.nano.cz", rname: "dns.nano.cz"}}
+    r3 := RRset{&Nxdomain{question:"karel.cz", mname: "ns1.nano.cz", rname: "dns.nano.cz"}}
     r3.CheckValid()
     p3 := r3.GetPacket()
 
@@ -57,7 +56,6 @@ func main() {
 
         var answer *Packet
         switch query.Question() {
-        //case "google.com":  answer = p1
         case "google.com":  answer = p1
         case "decin.cz":    answer = p2
         case "karel.cz":    answer = p3
@@ -67,17 +65,6 @@ func main() {
             answer.IngestPacketId(query.bytes[:IDLEN])
         }
         return answer
-
-        /*
-        var answer *Packet
-        switch query.questionString() {
-        case "google.com":  answer = query.getAnswer(r1)
-        case "decin.cz":    answer = query.getAuthoritativeAnswer(r2)
-        //case "incoming.telemetry.mozilla.org": answer = query.getAuthoritativeAnswer(r3)
-        case "bla.com": answer = query.getAuthoritativeAnswer(r3)
-        }
-        return answer
-        */
     })
 
     fmt.Printf("-- %+v\n", dx)
