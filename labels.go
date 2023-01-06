@@ -8,8 +8,15 @@ import (
 )
 
 type LabelMap struct {
+    // serialized and formatted bytes ready to be used in a packet
     bytes []byte
+
+    // cache/map of indexes of different labels in the bytes (above)
     index map[string]int
+
+    // example: google.com
+    // bytes: 6 103 111 111 103 108 101 3 99 111 109
+    // index: google.com:0, com:7
 }
 // splice hostname by each label (separated by '.')
 // and record position index of each of those in the resulting byte slice
@@ -45,7 +52,7 @@ func MapLabelQuestion(s string) *LabelMap {
     lm.bytes = append(lm.bytes, []byte{ROOT, 0, A, 0, IN}...)
     return lm
 }
-func (lm *LabelMap) labelize(s string) (string, string) {
+func (lm *LabelMap) splitLabels(s string) (string, string) {
     parts := strings.Split(s, ".")
     i:=0
     for ; i<len(parts); i++ {
@@ -92,7 +99,7 @@ func (lm *LabelMap) extendRR(l1, l2 string, typ, class, ttl int) {
         //  no match with only unknown part and will need root '.' added
         // known, unknown != ""
         //  partial match with both known+unknown parts and will need label pointer added (to the known part)
-        known, unknown := lm.labelize(l2)
+        known, unknown := lm.splitLabels(l2)
         if unknown == "" {
             // is this needed, validation should catch this?
             panic(fmt.Sprintf("L2 has full label match - this is baad: %s", l2))
@@ -135,7 +142,7 @@ func (lm *LabelMap) extendSOA(mname, rname string, serial, refresh, retry, expir
         //  no match with only unknown part and will need full byte definition
         // known, unknown != ""
         //  partial match with both known+unknown parts and will need byte definition and label pointer
-        known, unknown := lm.labelize(s)
+        known, unknown := lm.splitLabels(s)
         if unknown == "" {
             b = append(b, []byte{COMPRESSED_LABEL, byte(lm.index[known])}...)
         } else {
@@ -159,7 +166,6 @@ func (lm *LabelMap) extendSOA(mname, rname string, serial, refresh, retry, expir
                 b = append(b, []byte{COMPRESSED_LABEL, byte(lm.index[known])}...)
             }
         }
-        fmt.Println("==============")
     }
 
     // update lm.bytes with the full SOA byte slice
@@ -187,20 +193,6 @@ func (lm *LabelMap) typeClassTtl(t, c, l int) {
 //
 // helpers
 
-func (lm *LabelMap) rdata(masterlen int) {
-    // add rdlength
-    b := []byte{0, byte(len(lm.bytes))}
-    lm.bytes = append(b, lm.bytes...)
-    // move indexes by two (bytes) to account for rdlength
-    // move indexes by masterlength (bytes)
-    for k, v := range lm.index {
-        lm.index[k] = v+2+masterlen
-    }
-}
-func (lm *LabelMap) finalizeQuestion() {
-    // add root(.), 2 bytes each of type, class
-    lm.bytes = append(lm.bytes, []byte{ROOT, 0, A, 0, IN}...)
-}
 // integer to byte slice
 func itobs(size, i uint64) []byte {
     if i > uint64(1<<size-1) {

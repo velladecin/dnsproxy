@@ -1,4 +1,16 @@
 package main
+// server
+const (
+    NET = "udp4"
+    PORT = 53
+    // default upstream
+    US1 = "8.8.8.8"
+    US2 = "8.8.4.4"
+    // pre-prepared queue size for
+    // pktFactory & upsFactory
+    FACTORY_Q_SIZE = 3
+)
+
 // see autopsy.txt for more details
 
 /*

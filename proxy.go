@@ -3,22 +3,8 @@ package main
 import (
     "fmt"
     "net"
-_    "sync"
     "regexp"
-)
-
-const (
-    // net
-    network = "udp4"
-    port = 53
-
-    // default upstream
-    upstream1 = "8.8.8.8"
-    upstream2 = "8.8.4.4"
-
-    // pre-prepared queue size
-    // for upstream/remote connections and empty packets
-    factoryQsize = 3
+    "strings"
 )
 
 type DnsProxy struct {
@@ -39,15 +25,13 @@ type DnsProxy struct {
 
 func NewDnsProxy(upstream ...string) (*DnsProxy, error) {
     var dx DnsProxy
-
-    // TODO listen on public IP(s?)
-    conn, err := net.ListenPacket(network, fmtDnsNetPoint("127.0.0.1")[0])
+    conn, err := net.ListenPacket(NET, fmt.Sprintf(":%d", PORT))
     if err != nil {
         return &dx, err
     }
 
     if len(upstream) == 0 {
-        upstream = []string{upstream1, upstream2}
+        upstream = []string{US1, US2}
     }
 
     dx.Listener = conn
@@ -70,7 +54,8 @@ func (dx *DnsProxy) proxy_new(query []byte, client net.Addr) {
     fmt.Printf("query: %+v\n", query)
 
     answer := dx.handler(query, client)
-    if len(answer) == 0 {
+    switch len(answer) {
+    case 0:
         // either handler didn't match any conditions
         // or handler has not been defined, go to upstream next
         upstream := <-dx.upstreamConn
@@ -89,7 +74,8 @@ func (dx *DnsProxy) proxy_new(query []byte, client net.Addr) {
         }
 
         fmt.Printf("upstream: %+v\n", answer)
-    } else {
+    default:
+        // handler produced smth
         // update packet id
         answer[0] = query[0]
         answer[1] = query[1]
@@ -121,7 +107,7 @@ func (dx *DnsProxy) Accept() {
 }
 
 func packetFactory() chan []byte {
-    ch := make(chan []byte, factoryQsize)
+    ch := make(chan []byte, FACTORY_Q_SIZE)
     go func() {
         for {
             p := make([]byte, 512)
@@ -133,9 +119,8 @@ func packetFactory() chan []byte {
 }
 
 func upstreamFactory(remote []string) chan net.Conn {
-    ch := make(chan net.Conn, factoryQsize)
+    ch := make(chan net.Conn, FACTORY_Q_SIZE)
     go func() {
-        errMax := 3
         errCount := 0
         for count:=0;; count++ {
             pos := count % len(remote)
@@ -143,22 +128,19 @@ func upstreamFactory(remote []string) chan net.Conn {
                 count = 0
             }
 
-            conn, err := net.Dial(network, remote[pos])
-            // catch network issues
-            // is this good enough?
-            if err == nil {
-                errCount = 0
-            } else {
+            conn, err := net.Dial(NET, remote[pos])
+            if err != nil {
+                // catch network issues
+                // is this good enough?
                 // TODO log this
                 // TODO do this by upstream server and take out non-functional
                 errCount++
-                if errCount >= errMax {
+                if errCount >= 3 {
                     panic(err)
                 }
-
                 continue
             }
-
+            errCount = 0
             ch <- conn
         }
     }()
@@ -172,30 +154,11 @@ func fmtDnsNetPoint(s ...string) []string {
         if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+\.\d+(\:\d+)?$`, val); !ok {
             panic("Invalid net definition: " + val)
         }
-
-        if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+\.\d+\:\d+$`, val); !ok {
-            val = fmt.Sprintf("%s:%d", val, port)
+        if parts := strings.Split(val, ":"); len(parts) == 1 {
+            val = fmt.Sprintf("%s:%d", val, PORT)
         }
-
         dnp[i] = val
     }
 
     return dnp
-
-    /* ORIGINAL
-    var dnp []string
-    for _, val := range s {
-        if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+\.\d+(\:\d+)?$`, val); !ok {
-            panic("Invalid net definition: " + val)
-        }
-
-        if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+\.\d+\:\d+$`, val); !ok {
-            val = fmt.Sprintf("%s:%d", val, port)
-        }
-
-        dnp = append(dnp, val)
-    }
-
-    return dnp
-    */
 }

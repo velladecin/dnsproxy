@@ -102,7 +102,6 @@ func (rs *rrset) GetBytes() []byte {
 
     h := NewAnswerHeaders()
     h.SetANcount(len(rs.recs))
-    h.SetQDcount(1)
     return append(h.Bytes, lm.bytes...)
 }
 
@@ -197,7 +196,6 @@ func (nx *nxdomain) GetBytes() []byte {
     //lm.bytes = append(lm.bytes, byte(0))
 
     h := NewNxdomainHeaders()
-    h.SetQDcount(1)
     h.SetNScount(1)
 
     fmt.Printf("3: NFlm: %+v\n", lm)
@@ -238,6 +236,7 @@ func NewAnswerHeaders() *Headers {
     h.SetAnswer()
     h.SetRD()
     h.SetRA()
+    h.SetQDcount(1)
     return h
 }
 func NewNxdomainHeaders() *Headers {
@@ -305,7 +304,7 @@ func (h *Headers) SetRcode(i uint8) {
         panic(fmt.Sprintf("RCODE not supported: %d", i))
     }
 
-    //p.UnsetBitInByte(Flags2, RCODE...)
+    //h.UnsetBitInByte(Flags2, RCODE...)
     // this should be as clean as whistle
     // therefore only set
     h.Bytes[Flags2] |= i
@@ -322,7 +321,7 @@ func (h *Headers) UnsetBitInByte(byt uint8, bit ...uint8) {
             panic(fmt.Sprintf("0-7 bit indexes in byte, got: %d", b))
         }
 
-        // p[byt] will bomb out
+        // h.Bytes[byt] will bomb out
         // if byt is not valid index
         h.Bytes[byt] |= (1<<b)
         h.Bytes[byt] ^= (1<<b)
