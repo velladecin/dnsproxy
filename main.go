@@ -11,15 +11,22 @@ func main() {
         panic(err)
     }
 
+    google := NewRRset([]string{"google.com", "velladec.org"},
+                   []string{"velladec.org", "velladec.in"},
+                   []string{"velladec.in", "1.1.1.1"},
+                   []string{"velladec.in", "2.2.2.2"}).GetBytes()
+
+    decin := NewNxdomain("decin.cz").GetBytes()
+
+    dx.Handler(func (query []byte, client net.Addr)(answer []byte) {
+        switch QueryStr(query) {
+        case "google.com": answer = google
+        case "decin.cz": answer = decin
+        }
+        return answer
+    })
+
     /*
-    r1 := rrset{
-        &rr{"google.com", "velladec.org", CNAME, 10},
-        &rr{"velladec.org", "velladec.in", CNAME, 20},
-        &rr{"velladec.in", "1.1.1.1", A, 20},
-        &rr{"velladec.in", "2.2.2.2", A, 30}}
-    r2 := rrset{
-        &rr{l1: "decin.cz", l2: "100.100.100.100", typ: A, ttl: 100},
-        &rr{l1: "decin.cz", l2: "200.200.200.200", typ: A, ttl: 200}}
     r3 := rrset{
         //&rr{"incoming.telemetry.mozilla.org", "telemetry-incoming.r53-2.services.mozilla.com", 5, 10},
         &rr{"bla.com", "telemetry-incoming.r53-2.services.mozilla.com", 5, 70},
@@ -27,6 +34,7 @@ func main() {
         &rr{"prod.ingestion-edge.prod.dataops.mozgcp.net", "34.120.208.123", 1, 90}}
         */
 
+    /*
     r1 := RRset{&Rdata{"google.com", "1.1.1.1", A, 100}}
     r1.CheckValid()
     p1 := r1.GetPacket()
@@ -66,6 +74,7 @@ func main() {
         }
         return answer
     })
+    */
 
     fmt.Printf("-- %+v\n", dx)
     dx.Accept()

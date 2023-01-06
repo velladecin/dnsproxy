@@ -34,7 +34,7 @@ type DnsProxy struct {
     emptyPacket <-chan []byte
 
     // DNS packet handler
-    handler func(question Packet, client net.Addr) (answer *Packet)
+    handler func(query []byte, client net.Addr) (answer []byte)
 }
 
 func NewDnsProxy(upstream ...string) (*DnsProxy, error) {
@@ -53,47 +53,53 @@ func NewDnsProxy(upstream ...string) (*DnsProxy, error) {
     dx.Listener = conn
     dx.upstreamConn = upstreamFactory(fmtDnsNetPoint(upstream...))
     dx.emptyPacket = packetFactory()
+    // initialize with handler that does nothing
+    // to force initialization of the struct field
+    dx.handler = func ([]byte, net.Addr) []byte {
+        var b []byte
+        return b
+    }
 
     return &dx, nil
 }
 
-func (dx *DnsProxy) Handler(h func(question Packet, client net.Addr) *Packet) { dx.handler = h }
-func (dx *DnsProxy) proxy_new(question []byte, client net.Addr) {
-    fmt.Printf("----------- %+v\n", question)
-    var answer *Packet
-    if dx.handler != nil {
-        answer = dx.handler(NewQueryPacket(question), client)
-        fmt.Printf("proxy::answer %+v\n", answer)
-    }
-    // handler() can return nil when no conditions are met there
-    // check answer and ask upstream if we have none yet (answer)
-    if answer == nil {
+func (dx *DnsProxy) Handler(h func(query []byte, client net.Addr)(answer []byte)) {
+    dx.handler = h
+}
+func (dx *DnsProxy) proxy_new(query []byte, client net.Addr) {
+    fmt.Printf("query: %+v\n", query)
+
+    answer := dx.handler(query, client)
+    if len(answer) == 0 {
+        // either handler didn't match any conditions
+        // or handler has not been defined, go to upstream next
         upstream := <-dx.upstreamConn
         defer upstream.Close()
 
-        // Upstream write question
-        _, err := upstream.Write(question)
+        // query upstream
+        _, err := upstream.Write(query)
+        if err != nil {
+            panic(err)
+        }
+        // receive answer
+        answer = <-dx.emptyPacket
+        _, err = upstream.Read(answer)
         if err != nil {
             panic(err)
         }
 
-        // Upstream receive answer
-        p := <-dx.emptyPacket
-        fmt.Println("1. =====================")
-        _, err = upstream.Read(p)
-        fmt.Println("2. =====================")
-        if err != nil {
-            panic(err)
-        }
-        fmt.Println("3. =====================")
-
-        fmt.Printf("%+v\n", p)
-        answer = NewAnswerPacket(p)
+        fmt.Printf("upstream: %+v\n", answer)
+    } else {
+        // update packet id
+        answer[0] = query[0]
+        answer[1] = query[1]
+        fmt.Printf("proxy::answer %+v\n", answer)
     }
 
     fmt.Printf("fansw: %+v\n", answer)
-    // Downstream write (back) answer
-    _, err := dx.Listener.WriteTo(answer.bytes, client)
+
+    // answer back to client
+    _, err := dx.Listener.WriteTo(answer, client)
     if err != nil {
         panic(err)
     }
