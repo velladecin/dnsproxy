@@ -2,7 +2,9 @@ package main
 
 import (
     "fmt"
-    "net"
+   _ "net"
+    _"strings"
+_    "regexp"
 )
 
 func main() {
@@ -11,20 +13,68 @@ func main() {
         panic(err)
     }
 
+    dx.cache = NewCache(
+        NewRRset("google.com", "1.1.1.1", "2.2.2.2", "3.3.3.3"),
+        NewRRset("neco.cz", "second.org", "third.cz", "1.2.3.4"),
+        NewNxdomain("decin.cz"),
+        NewNxdomain("karel.cz", "ns1.nano.cz", "dns.nano.cz"))
+
+    //google := NewRRset("google.com", "1.1.1.1", "2.2.2.2", "3.3.3.3").GetBytes()
+    //neco := NewRRset("neco.cz", "second.org", "third.cz", "1.2.3.4").GetBytes()
+
+    /*
     google := NewRRset([]string{"google.com", "velladec.org"},
                    []string{"velladec.org", "velladec.in"},
                    []string{"velladec.in", "1.1.1.1"},
                    []string{"velladec.in", "2.2.2.2"}).GetBytes()
 
-    decin := NewNxdomain("decin.cz").GetBytes()
+    neco := NewRRset([]string{"neco.cz", "second.org"},
+                     []string{"second.org", "third.cz"},
+                     []string{"third.cz", "1.2.3.4"}).GetBytes()
+    */
 
-    dx.Handler(func (query []byte, client net.Addr)(answer []byte) {
-        switch QueryStr(query) {
-        case "google.com": answer = google
-        case "decin.cz": answer = decin
+    //decin := NewNxdomain("decin.cz").GetBytes()
+    //karel := NewNxdomain("karel.cz", "ns1.nano.cz", "dns.nano.cz").GetBytes()
+
+    //rgx := regexp.MustCompile(`(^|\.)test\.cz$`)
+    //yahoo := NewRRset("yahoo.com", "100.100.100.100").GetBytes()
+    //dx.Handler(func (query []byte, client net.Addr)(answer []byte) {
+        /*
+        fmt.Printf("CLIENT: %+v\n", client)
+        netdets := strings.Split(client.String(), ":")
+        switch netdets[0] {
+        case "127.0.0.1":
+            fmt.Println("==== FROM LOCALHOST")
+            if QueryStr(query) == "yahoo.com" {
+                answer = yahoo
+            }
+        case "192.168.1.104":
+            fmt.Println(">>>>>> FROM PUBLIC IFACE")
         }
-        return answer
-    })
+        */
+
+        /*
+        question := QueryStr(query)
+
+        switch question {
+        case "google.com":  answer = google
+        case "neco.cz":     answer = neco
+        case "decin.cz":    answer = decin
+        case "karel.cz":    answer = karel
+        }
+
+        if len(answer) > 0 {
+            return answer
+        }
+
+        if rgx.MatchString(question) {
+            return NewNxdomain(question).GetBytes()
+        }
+
+        fmt.Printf("*************** %+v\n", answer)
+        */
+    //    return answer
+    //})
 
     /*
     r3 := rrset{
@@ -33,48 +83,6 @@ func main() {
         &rr{"telemetry-incoming.r53-2.services.mozilla.com", "prod.ingestion-edge.prod.dataops.mozgcp.net", 5, 80},
         &rr{"prod.ingestion-edge.prod.dataops.mozgcp.net", "34.120.208.123", 1, 90}}
         */
-
-    /*
-    r1 := RRset{&Rdata{"google.com", "1.1.1.1", A, 100}}
-    r1.CheckValid()
-    p1 := r1.GetPacket()
-    fmt.Printf("%+v\n", p1)
-
-    r2 := RRset{&Rdata{"decin.cz", "100.100.100.100", A, 150},
-                &Rdata{"decin.cz", "100.100.100.102", A, 140},
-                &Rdata{"decin.cz", "100.100.100.101", A, 130}}
-    r2.CheckValid()
-    p2 := r2.GetPacket()
-
-    r3 := RRset{&Nxdomain{question:"karel.cz", mname: "ns1.nano.cz", rname: "dns.nano.cz"}}
-    r3.CheckValid()
-    p3 := r3.GetPacket()
-
-    r4 := RRset{&Rdata{"neco.cz", "second.org", CNAME, 10},
-                &Rdata{"second.org", "third.cz", CNAME, 20},
-                &Rdata{"third.cz", "1.2.3.4", A, 30}}
-    r4.CheckValid()
-    p4 := r4.GetPacket()
-
-    dx.Handler(func (query Packet, client net.Addr) *Packet {
-        fmt.Printf("client: ===> %+v\n", client)
-        fmt.Printf("client: ===> %+v\n", client.Network())
-        fmt.Printf("client: ===> %+v\n", client.String())
-        fmt.Printf("query: ====> %+v\n", query)
-
-        var answer *Packet
-        switch query.Question() {
-        case "google.com":  answer = p1
-        case "decin.cz":    answer = p2
-        case "karel.cz":    answer = p3
-        case "neco.cz":     answer = p4
-        }
-        if answer != nil {
-            answer.IngestPacketId(query.bytes[:IDLEN])
-        }
-        return answer
-    })
-    */
 
     fmt.Printf("-- %+v\n", dx)
     dx.Accept()

@@ -5,6 +5,7 @@ import (
     "strings"
     "time"
     "regexp"
+    "sync"
 )
 
 var iprgx *regexp.Regexp = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
@@ -12,13 +13,14 @@ var emptyrgx *regexp.Regexp = regexp.MustCompile(`^\s*$`)
 
 type Rdata interface {
     GetBytes() []byte
+    QueryStr() string
 }
 
 //
 // RRs
 
 type rr struct {
-    // l1 hostname, l2 hostname or IP (dependency with type of record)
+    // l1 hostname, l2 hostname or IP (must match type of record)
     l1, l2 string
 
     // type of record
@@ -29,9 +31,8 @@ type rr struct {
 }
 func (r *rr) defaults() {
     // l1, l2 are given and typ is determined from l2
-    if iprgx.MatchString(r.l2) {
-        r.typ = A
-    } else {
+    r.typ = A
+    if ! iprgx.MatchString(r.l2) {
         r.typ = CNAME
     }
     if r.ttl == 0 {
@@ -39,56 +40,88 @@ func (r *rr) defaults() {
     }
 }
 
+// Resource Record Set
+// hostname(s) must be first, IP addr(s) must be last
+// multiple hostnames will be interpreted as CNAMEs
+// at least two records must be supplied
+// at least one IP addr must be supplied
+//
+// example: NewRRset(google.com, moogle.com, 1.1.1.1, 2.2.2.2)
+// google.com CNAME moogle.com
+// moogle.com A 1.1.1.1
+// moogle.com A 2.2.2.2
 type rrset struct {
+    // given/desired RRs
+    // this slice does not change
     recs []*rr
+
+    // RRs from which actual DNS response will be built
+    // in case of "checked" rrset this slice will change depending on check results
+    recsactive []*rr
+
+    // locking to safely do changes to recsactive
+    // while using them to dynamically build DNS records
+    sync.Mutex
 }
-func NewRRset(recs ...[]string) *rrset {
-    if len(recs) < 1 || len(recs) > 10 {
-        panic("Usage: NewRRset([l1, l2], ...), (limit: 1-10)")
+func NewRRset(recs ...string) *rrset {
+    var host []string
+    var ip []string
+    for i, j, x, y := 0, len(recs)-1, 0, 0; i<len(recs); i, j = i+1, j-1 {
+        // hostnames
+        if iprgx.MatchString(recs[i]) {
+            // this string is matching IP addr and marks the end of hostnames
+            // stop collecting hosts
+            x++
+        }
+        if x == 0 {
+            host = append(host, recs[i])
+        }
+
+        // ips
+        if ! iprgx.MatchString(recs[j]) {
+            // this string is not matching IP addr and marks the end of IPs
+            // stop collecting IPs
+            y++
+        }
+        if y == 0 {
+            ip = append(ip, recs[j])
+        }
+
+        // loop ctl
+        if x > 0 && y > 0 {
+            // both (hostnames & IPs) collections have stopped
+            // there is nothing else for us to do
+            break
+        }
     }
-
-    rc := make([]*rr, len(recs))
-    for i, rec := range recs {
-        if len(rec) != 2 {
-            panic("Usage: NewRRset([l1, l2]) - length must be 2")
-        }
-
-        ok1 := emptyrgx.MatchString(rec[0])
-        ok2 := emptyrgx.MatchString(rec[1])
-        if ok1 || ok2 {
-            panic("Usage: NewRRset([l1, l2]) - both must have non-empty value")
-        }
-
-        rc[i] = &rr{l1: rec[0], l2: rec[1]}
-        rc[i].defaults()
-
-        // check RR chains, ignoring the first record
-        // which by now must be in correct format
-        if i > 0 {
-            switch rc[i].typ {
-            case CNAME:
-                if rc[i-1].typ != CNAME {
-                    panic("NewRRset: broken types of CNAME chain")
-                }
-                if rc[i-1].l2 != rc[i].l1 {
-                    panic("NewRRset: broken CNAME chain")
-                }
-            case A:
-                switch rc[i-1].typ {
-                case CNAME:
-                    if rc[i-1].l2 != rc[i].l1 {
-                        panic("Broken CNAME/A chain")
-                    }
-                case A:
-                    if rc[i-1].l1 != rc[i].l1 {
-                        panic("Broken A record set")
-                    }
-                }
+    // validate RR chain
+    if len(host) == 0 || len(ip) == 0 || (len(host) + len(ip)) != len(recs) {
+        panic("Usage: NewRRset(hostname, ipaddr, ...)")
+    }
+    // build RR
+    var rc []*rr
+    for j, h := range host {
+        // A(s)
+        if j == len(host)-1 {
+            // last hostname (in possible CNAME chain)
+            // add IP(s) and exit 
+            for _, i := range ip {
+                rc = append(rc, &rr{l1: h, l2: i})
+                rc[len(rc)-1].defaults()
             }
+            break
         }
-    }
 
-    return &rrset{recs: rc}
+        // CNAME(s)
+        rc = append(rc, &rr{l1: h, l2: host[j+1]})
+        rc[len(rc)-1].defaults()
+    }
+    return &rrset{recs: rc, recsactive: rc}
+}
+func NewRRsetChecked(c Check, recs ...string) *rrset {
+    rs := NewRRset(recs...)
+    go c.Run(rs)
+    return rs
 }
 func (rs *rrset) GetBytes() []byte {
     var lm *LabelMap
@@ -103,6 +136,9 @@ func (rs *rrset) GetBytes() []byte {
     h := NewAnswerHeaders()
     h.SetANcount(len(rs.recs))
     return append(h.Bytes, lm.bytes...)
+}
+func (rs *rrset) QueryStr() string {
+    return rs.recs[0].l1
 }
 
 
@@ -200,6 +236,9 @@ func (nx *nxdomain) GetBytes() []byte {
 
     fmt.Printf("3: NFlm: %+v\n", lm)
     return append(h.Bytes, lm.bytes...)
+}
+func (nx *nxdomain) QueryStr() string {
+    return nx.question
 }
 
 // return DNS question as a string

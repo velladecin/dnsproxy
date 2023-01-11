@@ -19,6 +19,9 @@ type DnsProxy struct {
     // stream of (empty) packets
     emptyPacket <-chan []byte
 
+    // proxy cache
+    cache rrcache
+
     // DNS packet handler
     handler func(query []byte, client net.Addr) (answer []byte)
 }
@@ -39,9 +42,11 @@ func NewDnsProxy(upstream ...string) (*DnsProxy, error) {
     dx.emptyPacket = packetFactory()
     // initialize with handler that does nothing
     // to force initialization of the struct field
-    dx.handler = func ([]byte, net.Addr) []byte {
-        var b []byte
-        return b
+    dx.handler = func (query []byte, client net.Addr) []byte {
+        if dx.cache != nil {
+            return dx.cache.Bytes(QueryStr(query))
+        }
+        return nil
     }
 
     return &dx, nil
@@ -54,6 +59,7 @@ func (dx *DnsProxy) proxy_new(query []byte, client net.Addr) {
     fmt.Printf("query: %+v\n", query)
 
     answer := dx.handler(query, client)
+
     switch len(answer) {
     case 0:
         // either handler didn't match any conditions
