@@ -14,6 +14,7 @@ var emptyrgx *regexp.Regexp = regexp.MustCompile(`^\s*$`)
 type Rdata interface {
     GetBytes() []byte
     QueryStr() string
+    Notify() chan bool
 }
 
 //
@@ -51,13 +52,16 @@ func (r *rr) defaults() {
 // moogle.com A 1.1.1.1
 // moogle.com A 2.2.2.2
 type rrset struct {
-    // given/desired RRs
-    // this slice does not change
+    // given/desired RRs, these don't change
     recs []*rr
 
     // RRs from which actual DNS response will be built
     // in case of "checked" rrset this slice will change depending on check results
     recsactive []*rr
+
+    // notification channel for cache to rebuild
+    // packet bytes when recsactive have changed
+    notify chan bool
 
     // locking to safely do changes to recsactive
     // while using them to dynamically build DNS records
@@ -120,12 +124,13 @@ func NewRRset(recs ...string) *rrset {
 }
 func NewRRsetChecked(c Check, recs ...string) *rrset {
     rs := NewRRset(recs...)
+    rs.notify = make(chan bool)
     go c.Run(rs)
     return rs
 }
 func (rs *rrset) GetBytes() []byte {
     var lm *LabelMap
-    for i, rec := range rs.recs {
+    for i, rec := range rs.recsactive {
         if i == 0 {
             lm = MapLabelQuestion(rec.l1)
         }
@@ -134,11 +139,51 @@ func (rs *rrset) GetBytes() []byte {
     }
 
     h := NewAnswerHeaders()
-    h.SetANcount(len(rs.recs))
+    h.SetANcount(len(rs.recsactive))
     return append(h.Bytes, lm.bytes...)
 }
 func (rs *rrset) QueryStr() string {
     return rs.recs[0].l1
+}
+func (rs *rrset) Notify() chan bool {
+    return rs.notify
+}
+// diff result is based on Linux CLI diff - match is true, diff if false
+func (rs *rrset) activeRRdiff(newactive []*rr) bool {
+    // used for checking of diff between current and new (after checks) active RRs,
+    // order is not important to us as it does not change the RRset
+    // google.com A 1.1.1.1 & 2.2.2.2 vs
+    // google.com A 2.2.2.2 & 1.1.1.1 == SAME
+    // google.com A 1.1.1.1 & 2.2.2.2 vs
+    // google.com A 2.2.2.2           == DIFFERENT
+    if len(rs.recsactive) != len(newactive) {
+        return false
+    }
+
+    diff := make(map[string]int)
+    for i, j := 0, len(newactive)-1; i<=j; i, j = i+1, j-1 {
+        if i == j {
+            // odd number of elements - middle element,
+            // don't count it twice, or any further
+            diff[rs.recsactive[i].l1] += 1
+            diff[newactive[i].l1] += 1
+            break
+        }
+        // current
+        diff[rs.recsactive[i].l1] += 1
+        diff[rs.recsactive[j].l1] += 1
+        // new
+        diff[newactive[i].l1] += 1
+        diff[newactive[j].l1] += 1
+    }
+
+    // expect even counts (2 slices)
+    for _, v := range diff {
+        if (v % 2) != 0 {
+            return false
+        }
+    }
+    return true
 }
 
 
@@ -239,6 +284,11 @@ func (nx *nxdomain) GetBytes() []byte {
 }
 func (nx *nxdomain) QueryStr() string {
     return nx.question
+}
+func (nx *nxdomain) Notify() chan bool {
+    // explicitly defined nxdomain
+    // is not exptected to change
+    return nil
 }
 
 // return DNS question as a string

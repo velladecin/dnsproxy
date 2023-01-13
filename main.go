@@ -14,10 +14,11 @@ func main() {
     }
 
     dx.cache = NewCache(
-        NewRRset("google.com", "1.1.1.1", "2.2.2.2", "3.3.3.3"),
+        NewRRsetChecked(NewHttpCheck(), "google.com", "1.1.1.1", "142.250.70.206", "162.243.27.213"),
         NewRRset("neco.cz", "second.org", "third.cz", "1.2.3.4"),
         NewNxdomain("decin.cz"),
         NewNxdomain("karel.cz", "ns1.nano.cz", "dns.nano.cz"))
+        //NewRRsetChecked(NewHttpCheck(), "google.com", "1.1.1.1", "142.250.70.206", "162.243.27.213"))
 
     //google := NewRRset("google.com", "1.1.1.1", "2.2.2.2", "3.3.3.3").GetBytes()
     //neco := NewRRset("neco.cz", "second.org", "third.cz", "1.2.3.4").GetBytes()

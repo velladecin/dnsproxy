@@ -20,7 +20,7 @@ type DnsProxy struct {
     emptyPacket <-chan []byte
 
     // proxy cache
-    cache rrcache
+    cache *cache
 
     // DNS packet handler
     handler func(query []byte, client net.Addr) (answer []byte)
