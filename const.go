@@ -1,182 +1,125 @@
 package main
-// server
+
+// file config
 const (
-    NET = "udp4"
-    PORT = 53
-    // default upstream
-    US1 = "8.8.8.8"
-    US2 = "8.8.4.4"
-    // pre-prepared queue size for
-    // pktFactory & upsFactory
-    FACTORY_Q_SIZE = 3
+    // config options
+    localHostCfg    = "local.host"
+    localPortCfg    = "local.port"
+    remoteHostCfg   = "remote.host"
+    remotePortCfg   = "remote.port"
+    localRRCfg      = "local.rr"
+    defaultDomainCfg  = "default.domain"
+    serverLogCfg    = "server.log"
+    cacheLogCfg     = "cache.log"
+
+    // config default values
+    // NOTE: ports are strings!
+    localHost       = "127.0.0.1"
+    localPort       = "5353"
+    remoteHost      = "10.176.226.15"
+    remotePort      = "53"
+    localRR         = "/etc/dns-proxy/resource-records.txt"
+    defaultDomain   = "t3.internal"
+    serverLog       = "/scripts/net/var/log/dns-proxy/server.log"
+    cacheLog        = "/scripts/net/var/log/dns-proxy/cache.log"
 )
 
-// see autopsy.txt for more details
-
-/*
-    Headers:
-                                   1  1  1  1  1  1
-     0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                      ID                       |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |QR|   OpCode  |AA|TC|RD|RA| Z|AD|CD|   RCODE   |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                QDCOUNT/ZOCOUNT                |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                ANCOUNT/PRCOUNT                |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                NSCOUNT/UPCOUNT                |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                    ARCOUNT                    |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-*/
-
-// ID
+// service config
 const (
-    Id1 = iota
-    Id2
-    IDLEN
+    // seconds
+    // applies to dialing to upstream
+    CONNECTION_TIMEOUT = 1
+
+    // prep this many empty packets
+    // to handle incoming requests
+    PACKET_PREP_Q_SIZE = 10
 )
 
-// Flags byte[2,3]
-const (
-    Flags1 = iota + 2
-    Flags2
-)
-const (
-    RD = iota
-    TC
-    AA
-    _ // opcode start
-    _
-    _
-    _ // opcode end
-    QR
-)
 
-// OPCODE
+// packet
 const (
-    QUERY = iota
-    IQUERY              // obsolete rfc6895, 2.2. OpCode Assignment
-    STATUS
-    UNASSIGNED_OPCODE
-    NOTIFY
-    UPDATE
-)
+    // default size of DNS UDP packet
+    // no EDNS (yet) :-)
+    PACKET_SIZE = 1024
 
-const (
-    _ = iota // rcode start
-    _
-    _
-    _        // rcode end
-    CD
-    AD
-    Z
-    RA
-)
+    // index 0-1
+    QUERY_ID_LEN = 2
 
-// RCODE
-const (
-    NOERROR = iota
-    FORMATERROR
-    SERVFAIL
-    NXDOMAIN
-    NOTIMPLEMENTED  // query type not implemented/supported
-    REFUSED
-    NAME_EXIST_BUT_SHOULDNOT
-    RRSET_EXIST_BUT_SHOULDNOT
-    RR_NOEXIST_BUT_SHOULD
-    NOAUTH
-    NAME_NOT_IN_ZONE
+    // index 0-11
+    HEADER_LEN = QUERY_ID_LEN + 10
+
+    // index 12
+    QUESTION_START = HEADER_LEN
+
+    // according to docs this number can be (any?) above 190
+    // but I've not seen it other than 192
+    LABEL_POINTER = 192
+
+    // type
+    A       = 1
+    PTR     = 12
+    CNAME   = 5
+    SOA     = 6
+
+    // RCODE
+    FMTERROR = 1
+    SERVFAIL = 2
+    NXDOMAIN = 3
+
+    // class
+    IN      = 1
+
+    // arbitrary numbers which should not matter as client would not be localy caching answers
+    // if the client does cache then 10s TTL would be good time to be still responsive to changes
+    TTL     = 10
+    // SOA timers should not really matter
+    // (SOA SERIAL is current timestamp when cache loads)
+    REFRESH = 7200
+    RETRY   = 900
+    EXPIRE  = 86400
+    MINIMUM = 43200
+
+    // int
+    INT16    = 1<<4
+    INT32    = 1<<5
 )
 
+// headers
 const (
-    QDcount1 = iota + 4
-    QDcount2
-    ANcount1
-    ANcount2
-    NScount1
-    NScount2
-    ARcount1
-    ARcount2
+    // byte[2]
+    // make it response, auth answer, recursion desired
+    RESP    = 1<<7
+    AA      = 1<<2
+    RD      = 1
+
+    // byte[3]
+    // recursion available
+    RA      = 1<<7
+
+    // byte[5]
+    // number of entries in questions
+    QDCOUNT = 1
+
+    // byte[7]
+    // number of entries in answer
+    ANCOUNT = 1
+
+    // byte[9]
+    // number of entries in authority
+    NSCOUNT = 1
+
+    // byte[11]
+    // number of entries in additional section, we're adding "default"
+    ARCOUNT = 1
 )
 
-/*
-    Labels:
-
-    Question
-                                    1  1  1  1  1  1
-      0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                                               |
-    /                     QNAME                     /
-    /                                               /
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                     QTYPE                     |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                     QCLASS                    |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-
-    Answer (RR)
-                                  1  1  1  1  1  1
-    0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                                               |
-    /                                               /
-    /                     NAME                      /
-    /                                               /
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                     TYPE                      |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                     CLASS                     |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                     TTL                       |
-    |                                               |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-    |                   RDLENGTH                    |
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
-    /                    RDATA                      /
-    /                                               /
-    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-*/
-
+// SOA
 const (
-    QUESTION_LABEL_START = 12
-    COMPRESSED_LABEL = 192  // 11000000
-    RDLENGTH = 2
-    LABEL_END = 41
+    // .com is default
+    COM = "a.gtld-servers.net. nstld.verisign-grs.com."
 
-    Q_PARTSLEN = 2      // label, type/class
-    RR_PARTSLEN = 3     // label, type/class/ttl, label
-    HEADERSLEN = 12
-
-    ROOT = 0            // root / '.'
-)
-
-// TYPE
-const (
-    A = iota + 1
-    NS
-    MD          // obsolete use MX (mail destination)
-    MF          // obsolete use MX (mail forwarder)
-    CNAME
-    SOA
-    MB          // experimental (mail box)
-    MG          // experimental (mail group member)
-    MR          // experimental (mail rename domain name)
-    NULL        // experimental
-    WKS         // well known service description
-    PTR
-    HINFO       // host info
-    MINFO       // mailbox info
-    MX
-    TXT
-)
-// CLASS
-const (
-    IN = iota + 1
-    CS          // obsolete
-    CH          // chaos
-    HS          // hesiod
+    // add below and update switch in answer.go
+    ORG = "a0.org.afilias-nst.info. hostmaster.donuts.email."
+    CZ  = "a.ns.nic.cz. hostmaster.nic.cz."
+    AU  = "q.au. hostmaster.donuts.email."
 )
