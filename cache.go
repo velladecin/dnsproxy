@@ -12,9 +12,6 @@ import (
 )
 
 type Cache struct {
-    // file with local RR
-    file  string
-
     // cache
     pool map[string]*Answer
 
@@ -23,17 +20,24 @@ type Cache struct {
 
     // cache reload lock
     mux *sync.RWMutex
+
+    // file with local RR
+    file  string
+
+    // default domain
+    domain string
 }
 
 var rDot = regexp.MustCompile(`\.`)
 var rIp4 = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
 var rHost = regexp.MustCompile(`^[a-zA-Z0-9\-\.]+$`)
 
-func NewCache(rr string) *Cache {
-    c := &Cache{rr,
-                make(map[string]*Answer),
+func NewCache(rr, domain string) *Cache {
+    c := &Cache{make(map[string]*Answer),
                 fileops.NewWatcher(rr),
-                &sync.RWMutex{}}
+                &sync.RWMutex{},
+                rr,
+                domain}
 
     c.Load(true)
 
@@ -116,7 +120,7 @@ func (c *Cache) Load(init bool) {
         // add default domain if needed
         if ok := rDot.MatchString(sl[0]); !ok {
             sl[0] += "."
-            sl[0] += defaultDomain
+            sl[0] += c.domain
         }
 
         // check hostname
@@ -286,12 +290,13 @@ func (c *Cache) Load(init bool) {
     c.mux.RUnlock()
 }
 
-func (c *Cache) Get(q []byte) *Answer {
+func (c *Cache) Get(s string) *Answer {
     // don't think this is needed
     // safe read
     //c.mux.RLock()
     //defer c.mux.RUnlock()
 
+    /*
     if a, ok := c.pool[QuestionString(q)]; ok {
         if debug {
             cDebg.Print("Found in cache: " + QuestionString(q))
@@ -302,6 +307,19 @@ func (c *Cache) Get(q []byte) *Answer {
 
     if debug {
         cDebg.Print("Not found in cache: " + QuestionString(q))
+    }
+    */
+
+    if a, ok := c.pool[s]; ok {
+        if debug {
+            cDebg.Print("Found in cache: " + s)
+        }
+
+        return a
+    }
+
+    if debug {
+        cDebg.Print("Not found in cache: " + s)
     }
 
     return nil

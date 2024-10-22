@@ -18,5 +18,5 @@ func init() {
 func main() {
     s := NewServer(config, debugx, stdout)
     //fmt.Printf("%+v\n", s)
-    s.Accept()
+    s.Run()
 }
