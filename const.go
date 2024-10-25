@@ -9,6 +9,9 @@ const (
     SERVER_LOG      = "/var/log/dns-proxy/server.log"
     CACHE_LOG       = "/var/log/dns-proxy/cache.log"
 
+    SERVER_RELOAD   = "on-server-reload"
+    FILE_CHANGE     = "on-rr-file-change"
+
     // limit workers
     WORKER_MAX      = 20
 )
@@ -26,10 +29,9 @@ const (
     // applies to dialing to upstream
     CONNECTION_TIMEOUT = 1
 
-    // prep this many empty packets
-    // to handle incoming requests
-    // 7 packets per worker
-    PACKET_PREP_Q_SIZE = WORKER * 7
+    // prep this many empty packets to handle incoming requests
+    // at max workers this is 5 per worker
+    PACKET_PREP_Q_SIZE = 100
 )
 
 

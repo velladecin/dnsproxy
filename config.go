@@ -19,6 +19,8 @@ var empty   = regexp.MustCompile(`^\s*$`)
 var comma   = regexp.MustCompile(`,`)
 var ip4     = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
 
+// Host config
+
 type host struct {
     name string
     port int
@@ -61,21 +63,33 @@ func (h host) netConnString() string {
 }
 
 
+// Server config
+
+func defaultConfig() (host, []host, int, string, string, string, string, string, bool) {
+    lh, _ := newHosts(LOCAL_HOST)
+    return lh[0], make([]host, 0), WORKER, LOCAL_RR, SERVER_RELOAD, DEFAULT_DOMAIN, SERVER_LOG, CACHE_LOG, false
+}
+
 type cfg struct {
+    // config file
+    config string
+
     // local host:port ready
     // to be used in net.Conn
-    localHost host
-
-    // local workers (listeners)
-    localWorker int
+    listener host
 
     // remote hosts:port ready
     // to be used in net.Conn
-    remoteHost []host
+    dialer []host
 
-    // file of local RR
-    // definitions
-    localRR string
+    // local workers (listeners)
+    worker int
+
+    // Resource Records file
+    rrFile string
+
+    // cache update/reload
+    cacheUpdate string
 
     // default domain
     defaultDomain string
@@ -83,26 +97,33 @@ type cfg struct {
     // logs
     serverLog string
     cacheLog string
+
+    // debug
+    debug bool
 }
 
 func newCfg(config string) (*cfg, error) {
-    // config defaults
-    lh, _ := newHosts(LOCAL_HOST)
-    c := &cfg{
-        lh[0],
-        WORKER,
-        make([]host, 0),
-        LOCAL_RR,
-        DEFAULT_DOMAIN,
-        SERVER_LOG,
-        CACHE_LOG,
-    }
+    // default config
+    lHost, rHost, worker, rrFile, cUpd, dDom, sLog, cLog, debug := defaultConfig()
+    c := &cfg{config, lHost, rHost, worker, rrFile, cUpd, dDom, sLog, cLog, debug}
 
-    // evaluate disk config options
-
-    fh, err := os.Open(config)
+    // disk config
+    err := c.fromDisk()
     if err != nil {
         return nil, err
+    }
+
+    return c, nil
+}
+
+func (c *cfg) fromDisk() error {
+    // defaults
+    lHost, rHost, worker, rrFile, cUpd, dDom, sLog, cLog, debug := defaultConfig()
+
+    // disk config
+    fh, err := os.Open(c.config)
+    if err != nil {
+        return err
     }
 
     scanner := bufio.NewScanner(fh)
@@ -119,75 +140,93 @@ func newCfg(config string) (*cfg, error) {
 
         cs := strings.Split(line, "=")
         if len(cs) != 2 {
-            return nil, errors.New("Invalid config: " + line)
+            return errors.New("Invalid config: " + line)
         }
 
         switch cs[0] {
-        case "local.host":
+        case "listener":
             h, err := newHosts(cs[1])
             if err != nil {
-                return nil, err
+                return err
             }
 
             if len(h) != 1 {
-                return nil, errors.New("local.host must be single definition")
+                return errors.New("listener must be single definition")
             }
 
-            c.localHost = h[0]
+            lHost = h[0]
 
-        case "local.worker":
+        case "dialer":
+            h, err := newHosts(cs[1])
+            if err != nil {
+                return err
+            }
+
+            rHost = h
+
+        case "workers":
             i, err := strconv.Atoi(cs[1])
             if err != nil {
-                return nil, err
+                return err
             }
 
             if i > WORKER_MAX {
-                return nil, fmt.Errorf("Too many workers: %d, limit %d", i, WORKER_MAX)
+                return fmt.Errorf("workers over limit: %d, limit %d", i, WORKER_MAX)
             }
 
-            c.localWorker = i
+            worker = i
 
-        case "remote.host":
-            h, err := newHosts(cs[1])
-            if err != nil {
-                return nil, err
-            }
-
-            c.remoteHost = h
-
-        case "local.rr":
+        case "rr.file":
             // this file may or may not exist
             // therefore do not check
-            c.localRR = cs[1]
+            rrFile = cs[1]
+
+        case "cache.update":
+            switch cs[1] {
+            case SERVER_RELOAD:
+            case FILE_CHANGE:
+            default:
+                return fmt.Errorf("cache.update unknown value: " + cs[1])
+            }
+            cUpd = cs[1]
 
         case "default.domain":
             // default domain limited
             // to 256 chars
             if len(cs[1]) > 256 {
-                return nil, errors.New("default.domain definition too long")
+                return errors.New("default.domain definition too long")
             }
-            c.defaultDomain = cs[1]
+            dDom = cs[1]
 
         // location check is bit further down
         case "server.log":
-            c.serverLog = cs[1]
+            sLog = cs[1]
 
         case "cache.log":
-            c.cacheLog = cs[1]
+            cLog = cs[1]
+
+        case "debug":
+            if cs[1] != "on" && cs[1] != "off" {
+                return errors.New("debug unknown value: " + cs[1])
+            }
+
+            if cs[1] == "on" {
+                debug = true
+            }
 
         default:
-            return nil, errors.New("Unknown config option: " + line)
+            return errors.New("Unknown config option: " + line)
         }
     }
 
     if err := scanner.Err(); err != nil {
-        return nil, err
+        return err
     }
 
     defer fh.Close()
 
     // make sure we can log
-    for _, d := range []string{filepath.Dir(c.serverLog), filepath.Dir(c.cacheLog)} {
+    for _, d := range []string{filepath.Dir(sLog), filepath.Dir(cLog)} {
         _, err := os.Stat(d)
         if err != nil {
             if os.IsNotExist(err) {
@@ -196,7 +235,7 @@ func newCfg(config string) (*cfg, error) {
                 if e := os.MkdirAll(d, os.ModePerm); e != nil {
                     // could not create destination dir
                     // is not fine
-                    return nil, e
+                    return e
                 }
 
                 // success creating
@@ -206,16 +245,27 @@ func newCfg(config string) (*cfg, error) {
 
             // other err than not-exist
             // is not fine
-            return nil, err
+            return err
         }
     }
 
-    return c, nil
+    // update config
+    c.listener = lHost
+    c.dialer = rHost
+    c.worker = worker
+    c.rrFile = rrFile
+    c.cacheUpdate = cUpd
+    c.defaultDomain = dDom
+    c.serverLog = sLog
+    c.cacheLog = cLog
+    c.debug = debug
+
+    return nil
 }
 
 // local host strings are the same
 func (c *cfg) localNetConnString() string {
-    return c.localHost.netConnString()
+    return c.listener.netConnString()
 }
 
 func (c *cfg) localHostString() string {
@@ -226,20 +276,20 @@ func (c *cfg) localHostString() string {
 func (c *cfg) remoteNetConnString() string {
     // select one upstream
     // for network connection
-    l := len(c.remoteHost)
+    l := len(c.dialer)
 
     if l == 1 {
-        return c.remoteHost[0].netConnString()
+        return c.dialer[0].netConnString()
     }
 
-    rand.Seed(time.Now().Unix())
-    return c.remoteHost[rand.Intn(l)].netConnString()
+    rand.Seed(time.Now().UnixMicro())
+    return c.dialer[rand.Intn(l)].netConnString()
 }
 
 func (c *cfg) remoteHostString() string {
     // provide all upstream details
     var s []string
-    for _, h := range c.remoteHost {
+    for _, h := range c.dialer {
         s = append(s, h.netConnString()) 
     }
 

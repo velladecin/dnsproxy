@@ -8,6 +8,7 @@ import (
     // golang.org -> cmd/vendor/golang.org
     "golang.org/x/sys/unix"
     "context"
+    "vella/fileops"
 )
 
 // TODO signals to terminate
@@ -19,45 +20,43 @@ var debug bool
 var sInfo, sWarn, sCrit, sDebg Logger
 var cInfo, cWarn, cCrit, cDebg Logger
 
+
+//
+// server
+
 type Server struct {
-    worker []*Proxy
-}
+    // listening processes
+    procs []Worker
 
-func (s Server) Run() {
-    for i, srv := range s.worker {
-        go srv.Accept() 
-        sInfo.Printf("Listener worker #%d accepting connections", i+1)
-    }
-
-    for {
-        time.Sleep(1*time.Second)
-    }
-}
-
-type Proxy struct {
-    // local listener
-    listener net.PacketConn
-
-    // remote listener/dialer
-    dialer <-chan string
-    
     // prepares and provides empty packets
-    packet <-chan []byte
+    packet chan []byte
+
+    // prepares remote dialer strings (ip:port)
+    // to use for upstream connection
+    dialer chan string
 
     // local cache
-    c *Cache
+    cache *Cache
 
-    // worker ID
-    id int
+    // cache watcher
+    cacheWatch fileops.FileObj
+
+    // server config
+    cfg *cfg
+
+    // listening socket config
+    netcfg net.ListenConfig
 }
 
-func NewServer(config string, dbg, stdout bool) Server {
-    debug = dbg
 
+func NewServer(config string, stdout bool) Server {
     conf, err := newCfg(config)
     if err != nil {
         panic(err)
     }
+
+    // global debug
+    debug = conf.debug
 
     // CLI overwrites config file
     if stdout {
@@ -69,79 +68,115 @@ func NewServer(config string, dbg, stdout bool) Server {
     sInfo, sWarn, sCrit, sDebg = NewHandles(conf.cacheLog)
 
     sInfo.Printf("== Server Configuration ==")
-    sInfo.Printf("Local host: %s", conf.localHostString())
-    sInfo.Printf("Local worker: %d", conf.localWorker)
-    sInfo.Printf("Remote host: %s", conf.remoteHostString())
-    sInfo.Printf("Resource records: %s", conf.localRR)
+    sInfo.Printf("Listener: %s", conf.localHostString())
+    sInfo.Printf("Dialer: %s", conf.remoteHostString())
+    sInfo.Printf("Workers: %d", conf.worker)
+    sInfo.Printf("Resource records (rr) file: %s", conf.rrFile)
+    sInfo.Printf("Cache update: %s", conf.cacheUpdate)
     sInfo.Printf("Default domain: %s", conf.defaultDomain)
     sInfo.Printf("Server log: %s", conf.serverLog)
     sInfo.Printf("Cache log: %s", conf.cacheLog)
+    sInfo.Printf("Debug: %v", conf.debug)
 
-    // cache
-    cache := NewCache(conf.localRR, conf.defaultDomain)
+    // build up server
 
-    // dialer
-    dch := make(chan string, PACKET_PREP_Q_SIZE + (conf.localWorker-WORKER)*7)
-    go func(c chan string) {
-        for {
-            c <- conf.remoteNetConnString()
-        }
-    }(dch)
+    srv := Server{
+        make([]Worker, conf.worker),
+        make(chan []byte, PACKET_PREP_Q_SIZE),
+        make(chan string, PACKET_PREP_Q_SIZE),
+        NewCache(conf.rrFile, conf.defaultDomain),
+        fileops.NewWatcher(conf.rrFile),
+        conf,
+        net.ListenConfig{
+            Control: func (net, addr string, c syscall.RawConn) error {
+                return c.Control(func(fd uintptr) {
+                    // SO_REUSEADDR
+                    err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
+                    if err != nil {
+                        panic(err)
+                    }
 
-    // packets (empty)
-    pch := make(chan []byte, PACKET_PREP_Q_SIZE + (conf.localWorker-WORKER)*7)
+                    // SO_REUSEPORT
+                    err = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+                    if err != nil {
+                        panic(err)
+                    }
+                })
+            },
+        },
+    }
+
+    // packets
     go func(c chan []byte) {
         for {
             c <- make([]byte, PACKET_SIZE)
         }
-    }(pch)
+    }(srv.packet)
 
-    // network config
-    lconf := net.ListenConfig{
-        Control: func (net, addr string, c syscall.RawConn) error {
-            return c.Control(func(fd uintptr) {
-                // SO_REUSEADDR
-                err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
-                if err != nil {
-                    panic(err)
-                }
+    // dialer
+    go func(c chan string) {
+        for {
+            c <- srv.cfg.remoteNetConnString()
+        }
+    }(srv.dialer)
 
-                // SO_REUSEPORT
-                err = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
-                if err != nil {
-                    panic(err)
-                }
-            })
-        },
-    }
+    // cache watcher
+    go func(cw fileops.FileObj) {
+        for w := range cw.Comms() {
+            if w.Data() == fileops.File_chg {
+                srv.cache.Load(false)
+            }
+        }
+    }(srv.cacheWatch)
 
-    srv := Server{make([]*Proxy, conf.localWorker)}
-    
-    for i:=0; i<conf.localWorker; i++ {
-        ll, err := lconf.ListenPacket(context.Background(), "udp4", conf.localNetConnString())
-        if err != nil {
+    for i:=0; i<srv.cfg.worker; i++ {
+        l, err := srv.netcfg.ListenPacket(context.Background(), "udp4", srv.cfg.localNetConnString())
+        if err !=  nil {
             panic(err)
         }
 
-        sInfo.Printf("Listener worker #%d netsock bind: %s", i+1, ll.LocalAddr().String())
-
-        srv.worker[i] = &Proxy{ll, dch, pch, cache, i+1}
+        sInfo.Printf("Listener #%d socket bind: %s", i+1, l.LocalAddr().String())
+        srv.procs[i] = Worker{l, i+1}
     }
 
     return srv
 }
 
-func (p *Proxy) Accept() {
-
-    // don't panic() in the below connections
-    // client will hopefully just timeout
+func (s Server) Run() {
+    for i, p := range s.procs {
+        go p.Accept(s.dialer, s.packet, s.cache)
+        sInfo.Printf("Listener #%d accepting connections", i+1)
+    }
 
     for {
-        query := <-p.packet
-        answer := <-p.packet
+        time.Sleep(1*time.Second)
+    }
+}
+
+
+
+//
+// worker
+
+type Worker struct {
+    // local listener
+    listener net.PacketConn
+
+    // worker id
+    id int
+}
+
+func (w Worker) Accept(d chan string, p chan []byte, c *Cache) {
+
+    // don't panic() in the below connections
+    // client will just timeout
+
+    for {
+        query := <-p
+        answer := <-p
 
         // receiver
-        ql, addr, err := p.listener.ReadFrom(query) // blocking
+        ql, addr, err := w.listener.ReadFrom(query) // blocking
         if err != nil {
             if ql > 0 {
                 sCrit.Print("Could not read request: bytes read %d, err: %s: ", ql, err.Error())
@@ -152,31 +187,31 @@ func (p *Proxy) Accept() {
 
         qs := Question(query[0:ql])
 
-        sInfo.Printf("worker %d: Query id: %d, len: %d, question: %s", p.id, bytesToInt(query[:2]), ql, qs)
+        sInfo.Printf("#%d: Query id: %d, len: %d, question: %s", w.id, bytesToInt(query[:2]), ql, qs)
         if debug {
-            sDebg.Printf("worker %d: Query id: %d, bytes: %+v", p.id, bytesToInt(query[:2]), query[0:ql])
+            sDebg.Printf("#%d: Query id: %d, bytes: %+v", w.id, bytesToInt(query[:2]), query[0:ql])
         }
 
         // check local cache or
         // contact remote/dialer
 
-        if a := p.c.Get(qs); a != nil {
+        if a := c.Get(qs); a != nil {
             a.CopyRequestId(query)
             answer = a.serializePacket(answer)
 
-            sInfo.Printf("worker %d: Resp id: %d, len: %d, answer: %s", p.id, bytesToInt(answer[:2]), len(answer), a.ResponseString())
+            sInfo.Printf("#%d: Resp id: %d, len: %d, answer: %s", w.id, bytesToInt(answer[:2]), len(answer), a.ResponseString())
         } else {
-            dialer, err := net.Dial("udp4", <-p.dialer)
+            dialer, err := net.Dial("udp4", <-d)
             if err != nil {
                 if debug {
-                    sDebg.Printf("worker %d: Failed to dial upstream: %s", p.id, err.Error())
+                    sDebg.Printf("#%d: Failed to dial upstream: %s", w.id, err.Error())
                 }
 
                 continue
             }
 
             if debug {
-                sDebg.Printf("worker %d: Dialing to upstream: %s", p.id, dialer.RemoteAddr().String())
+                sDebg.Printf("#%d: Dialing to upstream: %s", w.id, dialer.RemoteAddr().String())
             }
 
             // request timeout
@@ -185,35 +220,37 @@ func (p *Proxy) Accept() {
             al := 0
             al, err = dialer.Write(query[0:ql])
             if err != nil {
-                sCrit.Printf("worker %d: Failed to write query to upstream, written: %d, error: %s", p.id, al, err.Error())
+                sCrit.Printf("#%d: Failed to write query to upstream, written: %d, error: %s", w.id, al, err.Error())
                 continue
             }
 
             if debug {
-                sDebg.Printf("worker %d: Bytes written to dialer: %d", p.id, al)
+                sDebg.Printf("#%d: Bytes written to dialer: %d", w.id, al)
             }
 
             al = 0
             al, err = dialer.Read(answer)
             if err != nil {
-                sCrit.Printf("worker %d: Failed to read from upstream, read: %d, error: %s", p.id, al, err.Error())
+                sCrit.Printf("#%d: Failed to read from upstream, read: %d, error: %s", w.id, al, err.Error())
                 continue
             }
 
             answer = answer[0:al]
 
             // TODO fish out answer from upstream
-            sInfo.Printf("worker %d, Resp id: %d, upstream: %s, len: %d", p.id, bytesToInt(answer[:2]), dialer.RemoteAddr().String(), al)
+            sInfo.Printf("#%d, Resp id: %d, upstream: %s, len: %d", w.id, bytesToInt(answer[:2]), dialer.RemoteAddr().String(), al)
             dialer.Close()
         }
         
         if debug {
-            sDebg.Printf("worker %d: Resp id: %d, bytes: %+v", p.id, bytesToInt(answer[:2]), answer)
+            sDebg.Printf("#%d: Resp id: %d, bytes: %+v", w.id, bytesToInt(answer[:2]), answer)
         }
 
-        _, err = p.listener.WriteTo(answer, addr)
+        // write answer back to client
+
+        _, err = w.listener.WriteTo(answer, addr)
         if err != nil {
-            sCrit.Printf("worker %d: Failed to write answer back to the client: %s", p.id, err.Error())
+            sCrit.Printf("#%d: Failed to write answer back to the client: %s", w.id, err.Error())
         }
     }
 }

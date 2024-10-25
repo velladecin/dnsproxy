@@ -8,15 +8,11 @@ import (
     "strings"
     "sync"
     "errors"
-    "vella/fileops"
 )
 
 type Cache struct {
     // cache
     pool map[string]*Answer
-
-    // RR file monitor
-    watch fileops.FileObj
 
     // cache reload lock
     mux *sync.RWMutex
@@ -33,31 +29,26 @@ var rIp4 = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
 var rHost = regexp.MustCompile(`^[a-zA-Z0-9\-\.]+$`)
 
 func NewCache(rr, domain string) *Cache {
-    c := &Cache{make(map[string]*Answer),
-                fileops.NewWatcher(rr),
-                &sync.RWMutex{},
-                rr,
-                domain}
+    c := &Cache{
+        make(map[string]*Answer),
+        &sync.RWMutex{},
+        rr,
+        domain,
+    }
 
     c.Load(true)
-
-    go func(cc *Cache) {
-        for w := range cc.watch.Comms() {
-            if w.Data() == fileops.File_chg {
-                cc.Load(false)
-            }
-        }
-    }(c)
-
     return c
 }
 
+// cache.Load() panics on errors on server start up
+// otherwise errors and won't update
+
 func (c *Cache) Load(init bool) {
-    r := "(Re)Loading"
     if init {
-        r = "Initializing"
+        cInfo.Print("Initializing cache")
+    } else {
+        cInfo.Print("Reloading cache")
     }
-    cInfo.Print(r + " cache")
 
     start := regexp.MustCompile(`^\s+`)
     mid   := regexp.MustCompile(`\s+`)
@@ -295,20 +286,6 @@ func (c *Cache) Get(s string) *Answer {
     // safe read
     //c.mux.RLock()
     //defer c.mux.RUnlock()
-
-    /*
-    if a, ok := c.pool[QuestionString(q)]; ok {
-        if debug {
-            cDebg.Print("Found in cache: " + QuestionString(q))
-        }
-
-        return a
-    }
-
-    if debug {
-        cDebg.Print("Not found in cache: " + QuestionString(q))
-    }
-    */
 
     if a, ok := c.pool[s]; ok {
         if debug {
