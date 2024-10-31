@@ -12,7 +12,8 @@ import (
 
 type Cache struct {
     // cache
-    pool map[string]*Answer
+    //pool map[string]*Answer
+    pool map[int]map[string]*Answer
 
     // cache reload lock
     mux *sync.RWMutex
@@ -30,7 +31,7 @@ var rHost = regexp.MustCompile(`^[a-zA-Z0-9\-\.]+$`)
 
 func NewCache(rr, domain string) *Cache {
     c := &Cache{
-        make(map[string]*Answer),
+        make(map[int]map[string]*Answer),
         &sync.RWMutex{},
         rr,
         domain,
@@ -55,7 +56,13 @@ func (c *Cache) Load(init bool) {
     end   := regexp.MustCompile(`\s+$`)
     rTTL  := regexp.MustCompile(`^ttl\:\d+$`)
 
-    answers := make(map[string]*Answer)
+    answers := map[int]map[string]*Answer{
+        A: {},
+        CNAME: {},
+        SOA: {},
+        PTR: {},
+        MX: {},
+    }
 
     fh, err := os.Open(c.file)
     if err != nil {
@@ -79,9 +86,10 @@ func (c *Cache) Load(init bool) {
     defer fh.Close()
 
     // composites records
-    // CNAME, A
+    // CNAME, A, MX
     cn := make(map[string]string)
     an := make(map[string][]string)
+    mn := make(map[string]string)
 
     fail := false
     scanner := bufio.NewScanner(fh)
@@ -131,6 +139,7 @@ func (c *Cache) Load(init bool) {
         //auth := false
         ptr := false 
         cname := false
+        mx := false
 
         if sl[1] == "nxdomain" {
             if len(sl) > 2 {
@@ -139,7 +148,7 @@ func (c *Cache) Load(init bool) {
                 break
             }
 
-            answers[sl[0]] = NewNxdomain(sl[0])
+            answers[A][sl[0]] = NewNxdomain(sl[0])
             continue
         }
 
@@ -150,6 +159,9 @@ func (c *Cache) Load(init bool) {
             case "cname":
                             a = false
                             cname = true
+            case "mx":
+                            a = false
+                            mx = true
             default:
                 // TODO
                 // flags with values
@@ -193,13 +205,36 @@ func (c *Cache) Load(init bool) {
         if ptr {
             // must be valid since 'if a {}' above passed
             iaa := InAddrArpa(sl[1])
-            answers[iaa] = NewPtr(iaa, sl[0])
+            answers[PTR][iaa] = NewPtr(iaa, sl[0])
             continue
         }
 
         if cname {
             cn[sl[0]] = sl[1]
             continue
+        }
+
+        if mx {
+            if ptr {
+                cCrit.Print("Invalid definition: MX+PTR: " + line)
+                fail = true
+                break
+            }
+            if cname {
+                cCrit.Print("Invalid definition: MX+CNAME: " + line)
+                fail = true
+                break
+            }
+
+            // check 2nd host
+            if ok := rHost.MatchString(sl[1]); !ok {
+                cWarn.Print("Invalid hostname: " + sl[1])
+                fail = true
+                break
+            }
+
+            // save for A name lookup later
+            mn[sl[0]] = sl[1]
         }
     }
 
@@ -236,7 +271,7 @@ func (c *Cache) Load(init bool) {
             return
         }
 
-        answers[a.QuestionString()] = a
+        answers[A][a.QuestionString()] = a
     }
 
     // process CNAMEs
@@ -266,10 +301,37 @@ func (c *Cache) Load(init bool) {
             return
         }
 
-        answers[a.QuestionString()] = a
+        answers[CNAME][a.QuestionString()] = a
     }
 
-    cInfo.Printf("Cache entries loaded: %d", len(answers))
+    // process MX records
+    for k, v := range mn {
+        if _, ok := answers[A][v]; !ok {
+            err := errors.New("Cannot find A record: " + v)
+            if init {
+                panic(err)
+            }
+
+            cCrit.Print(err.Error())
+            return
+        }
+
+        m, err := NewMx(k, v, answers)
+        if err != nil {
+            if init {
+                panic(err)
+            }
+
+            cCrit.Print(err.Error())
+            return
+        }
+
+        answers[MX][k] = m
+    }
+
+    for k, _ := range answers {
+        cInfo.Printf("Cache entries loaded %s: %d", RequestTypeString(k), len(answers[k]))
+    }
 
     // safe reload
     if debug {
@@ -281,15 +343,15 @@ func (c *Cache) Load(init bool) {
     c.mux.RUnlock()
 }
 
-func (c *Cache) Get(s string) *Answer {
+func (c *Cache) Get(t int, s string) *Answer {
     // don't think this is needed
     // safe read
     //c.mux.RLock()
     //defer c.mux.RUnlock()
 
-    if a, ok := c.pool[s]; ok {
+    if a, ok := c.pool[t][s]; ok {
         if debug {
-            cDebg.Print("Found in cache: " + s)
+            cDebg.Printf("Found in cache: %s/%s", RequestTypeString(t), s)
         }
 
         return a
@@ -307,7 +369,7 @@ func InAddrArpa(ip string) string {
     return fmt.Sprintf("%s.%s.%s.%s.in-addr.arpa", o[3], o[2], o[1], o[0])
 }
 
-func cnameChain(s string, cn map[string]string, answers map[string]*Answer) ([]string, error) {
+func cnameChain(s string, cn map[string]string, answers map[int]map[string]*Answer) ([]string, error) {
     r := make([]string, 0)
 
     if _, ok := cn[s]; ok {
@@ -320,7 +382,7 @@ func cnameChain(s string, cn map[string]string, answers map[string]*Answer) ([]s
 
         r = append(r, next...)
     } else {
-        if _, ok := answers[s]; !ok {
+        if _, ok := answers[A][s]; !ok {
             fmt.Println("ERROR ERROR: " + s)
             return nil, fmt.Errorf("Cannot find A record: " + s)
         }

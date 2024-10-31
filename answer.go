@@ -1,6 +1,7 @@
 package main
 
 import (
+_    "fmt"
     "strings"
     "regexp"
     "bytes"
@@ -10,8 +11,11 @@ import (
 )
 
 type Answer struct {
-    // 1+N resource records
+    // 1+N answer section
     rr [][]string
+
+    // 1+N additional section
+    addi [][]string
 
     // packet header
     header []byte 
@@ -30,12 +34,80 @@ type Answer struct {
     t int
 }
 
-// cache is used for A record
-func NewCname(q string, r []string, cache map[string]*Answer) (*Answer, error) {
+// cache is used for A record lookup
+func NewMx(q, mxhost string, cache map[int]map[string]*Answer) (*Answer, error) {
+    a := &Answer{[][]string{[]string{q, mxhost}},
+                 make([][]string, 0),
+                 make([]byte, HEADER_LEN),
+                 make([]byte, PACKET_SIZE-HEADER_LEN),
+                 make(map[string]int),
+                 0,
+                 MX}
+
+    // add A record
+    a.addi = append(a.addi, cache[A][mxhost].rr...)
+
+    if debug {
+        cDebg.Print("New MX: " + a.QandR())
+    }
+
+    // headers
+    a.setRespHeaders()
+
+    // question
+    a.Question()
+
+    // answer
+    a.labelize(a.QuestionString())
+
+    a.body[a.i+1] = MX
+    a.body[a.i+3] = IN
+    a.body[a.i+7] = TTL
+    // index a.i+8,9 is for total length
+    // of MX priority + host
+    a.i += 10
+
+    // -1 as we moved over to next byte
+    tl := a.i-1
+
+    // priority
+    a.body[a.i+1] = MXPRIO
+    a.i += 2
+    // mx host
+    a.labelize(mxhost)
+
+    // TODO why -1 here???
+    // total length
+    a.body[tl] = byte(a.i-tl-1)
+
+    // additional / A record
+    for _, r := range a.addi {
+        // response
+        a.labelize(r[0])
+
+        a.body[a.i+1] = A
+        a.body[a.i+3] = IN
+        a.body[a.i+7] = TTL
+        a.i += 8
+
+        _, err := a.labelizeIp(r[1])
+        if err != nil {
+            return nil, err
+        }
+    }
+
+    a.additional()
+
+    return a, nil
+}
+
+// cache is used for A record lookup
+func NewCname(q string, r []string, cache map[int]map[string]*Answer) (*Answer, error) {
 
     // TODO - make sure there's no CNAME loop!
 
     a := &Answer{make([][]string, 0),
+                 make([][]string, 0),
                  make([]byte, HEADER_LEN),
                  make([]byte, PACKET_SIZE-HEADER_LEN),
                  make(map[string]int),
@@ -59,7 +131,7 @@ func NewCname(q string, r []string, cache map[string]*Answer) (*Answer, error) {
     // A record is for last hostname
     // in CNAME chain
     last := a.rr[i][1]
-    a.rr = append(a.rr, cache[last].rr...)
+    a.rr = append(a.rr, cache[A][last].rr...)
 
     // headers
     a.setRespHeaders()
@@ -119,6 +191,7 @@ func NewPtr(q, soa string) *Answer {
     // TODO: looks like that PTR can also have many answers.. :/
 
     a := &Answer{[][]string{[]string{q, soa}},
+                 make([][]string, 0),
                  make([]byte, HEADER_LEN),
                  make([]byte, PACKET_SIZE-HEADER_LEN),
                  make(map[string]int),
@@ -171,6 +244,7 @@ func NewA(h string, ip []string) (*Answer, error) {
     }
 
     a := &Answer{rr,
+                 make([][]string, 0),
                  make([]byte, HEADER_LEN),
                  make([]byte, PACKET_SIZE-HEADER_LEN),
                  make(map[string]int),
@@ -210,37 +284,16 @@ func NewA(h string, ip []string) (*Answer, error) {
 
 func NewNxdomain(q string) *Answer {
     a := &Answer{make([][]string, 1),
+                 make([][]string, 0),
                  make([]byte, HEADER_LEN),
                  make([]byte, PACKET_SIZE-HEADER_LEN),
                  make(map[string]int),
                  0,
                  NXDOMAIN}
-    /*
-    // headers
-    a.header[2] |= RESP|RD
-    a.header[3] |= RA|NXDOMAIN
-    // set counts
-    a.header[5] |= QDCOUNT
-    a.header[9] |= NSCOUNT
-    a.header[11] |= ARCOUNT
-    */
 
     a.setRespHeaders()
 
     lbl := strings.Split(q, ".")
-
-    /*
-    // get the right most label to work out SOA
-    // right most label has the highest (position) index
-    x := -1
-    soalbl := ""
-    for l, i := range a.lblMap {
-        if i > x {
-            soalbl = l
-            x = i
-        }  
-    }
-    */
 
     // work out soa
     // from last label of hostname
@@ -346,13 +399,19 @@ func (a *Answer) setRespHeaders() {
     a.header[2] |= RESP|RD
     a.header[3] |= RA
 
+    // QD count is always 1
     a.header[5] = QDCOUNT
-    a.header[11] = ARCOUNT
+
+    // AN count
+    a.header[7] = byte(len(a.rr))
+
+    // AR count
+    a.header[11] = ARCOUNT + byte(len(a.addi))
 
     if a.t == NXDOMAIN {
         // NXDOMAIN headers
 
-        // authoritative
+        // TODO authoritative
         // this breaks query status, not sure why exactly..
         // status: NXDOMAIN
         // vs
@@ -367,12 +426,11 @@ func (a *Answer) setRespHeaders() {
         return
     }
 
-    a.header[7] = byte(len(a.rr))
 }
 
 func (a *Answer) additional() {
     // this gives size of packet (length) if it is over the standard 512 bytes,
-    // that's my understanding anyway..
+    // that's my understanding anyway.. (EDNS?)
 
     // 11 additional bytes at the end
 
@@ -534,7 +592,7 @@ func (a *Answer) ResponseString() string {
 }
 
 func (a *Answer) QandR() string {
-    return a.QuestionString() + " => " + a.ResponseString()
+    return a.QuestionString() + ", " + a.ResponseString()
 }
 
 // The two below currently work only for uint16, uint32

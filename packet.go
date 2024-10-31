@@ -52,3 +52,33 @@ func RequestType(q []byte) int {
     // first byte is 0
     return int(RequestTypeByte(q)[1])
 }
+
+func RequestTypeString(i int) string {
+    s := "not-yet-implemented"
+    switch i {
+    case A: s = "A"
+    case CNAME: s = "CNAME"
+    case SOA: s = "SOA"
+    case PTR: s = "PTR"
+    case MX: s = "MX"
+    //case TXT: s = "TXT"
+    }
+
+    return s
+}
+
+/*
+func RequestTypeString(q []byte) string {
+    s := "not-yet-implemented"
+    switch RequestType(q) {
+    case A: s = "A"
+    case CNAME: s = "CNAME"
+    case SOA: s = "SOA"
+    case PTR: s = "PTR"
+    case MX: s = "MX"
+    //case TXT: s = "TXT"
+    }
+
+    return s
+}
+*/

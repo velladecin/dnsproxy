@@ -38,7 +38,7 @@ const (
 // packet
 const (
     // default size of DNS UDP packet
-    PACKET_SIZE = 1024
+    PACKET_SIZE = 2048
 
     // index 0-1
     QUERY_ID_LEN = 2
@@ -65,6 +65,7 @@ const (
     FMTERROR = 1
     SERVFAIL = 2
     NXDOMAIN = 3
+    REFUSED  = 5
 
     // class
     IN      = 1
@@ -78,6 +79,8 @@ const (
     RETRY   = 900
     EXPIRE  = 86400
     MINIMUM = 43200
+    // MX priority
+    MXPRIO  = 25
 
     // int
     INT16    = 1<<4

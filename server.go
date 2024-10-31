@@ -187,7 +187,7 @@ func (w Worker) Accept(d chan string, p chan []byte, c *Cache) {
 
         qs := Question(query[0:ql])
 
-        sInfo.Printf("#%d: Query id: %d, len: %d, question: %s", w.id, bytesToInt(query[:2]), ql, qs)
+        sInfo.Printf("#%d: Query id: %d, type: %s, len: %d, question: %s", w.id, bytesToInt(query[:2]), RequestTypeString(RequestType(query[0:ql])), ql, qs)
         if debug {
             sDebg.Printf("#%d: Query id: %d, bytes: %+v", w.id, bytesToInt(query[:2]), query[0:ql])
         }
@@ -195,7 +195,7 @@ func (w Worker) Accept(d chan string, p chan []byte, c *Cache) {
         // check local cache or
         // contact remote/dialer
 
-        if a := c.Get(qs); a != nil {
+        if a := c.Get(RequestType(query[0:ql]), qs); a != nil {
             a.CopyRequestId(query)
             answer = a.serializePacket(answer)
 
