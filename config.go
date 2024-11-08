@@ -18,6 +18,7 @@ var space   = regexp.MustCompile(`\s+`)
 var empty   = regexp.MustCompile(`^\s*$`)
 var comma   = regexp.MustCompile(`,`)
 var ip4     = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
+var rrx     = regexp.MustCompile(`\.rr$`)
 
 // Host config
 
@@ -67,7 +68,7 @@ func (h host) netConnString() string {
 
 func defaultConfig() (host, []host, int, string, string, string, string, string, bool) {
     lh, _ := newHosts(LOCAL_HOST)
-    return lh[0], make([]host, 0), WORKER, LOCAL_RR, SERVER_RELOAD, DEFAULT_DOMAIN, SERVER_LOG, CACHE_LOG, false
+    return lh[0], make([]host, 0), WORKER, RR_DIR, SERVER_RELOAD, DEFAULT_DOMAIN, SERVER_LOG, CACHE_LOG, false
 }
 
 type cfg struct {
@@ -85,8 +86,8 @@ type cfg struct {
     // local workers (listeners)
     worker int
 
-    // Resource Records file
-    rrFile string
+    // Resource Records dir
+    rrDir string
 
     // cache update/reload
     cacheUpdate string
@@ -104,8 +105,8 @@ type cfg struct {
 
 func newCfg(config string) (*cfg, error) {
     // default config
-    lHost, rHost, worker, rrFile, cUpd, dDom, sLog, cLog, debug := defaultConfig()
-    c := &cfg{config, lHost, rHost, worker, rrFile, cUpd, dDom, sLog, cLog, debug}
+    lHost, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
+    c := &cfg{config, lHost, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug}
 
     // disk config
     err := c.fromDisk()
@@ -118,7 +119,7 @@ func newCfg(config string) (*cfg, error) {
 
 func (c *cfg) fromDisk() error {
     // defaults
-    lHost, rHost, worker, rrFile, cUpd, dDom, sLog, cLog, debug := defaultConfig()
+    lHost, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
 
     // disk config
     fh, err := os.Open(c.config)
@@ -176,10 +177,10 @@ func (c *cfg) fromDisk() error {
 
             worker = i
 
-        case "rr.file":
+        case "rr.dir":
             // this file may or may not exist
             // therefore do not check
-            rrFile = cs[1]
+            rrDir = cs[1]
 
         case "cache.update":
             switch cs[1] {
@@ -253,7 +254,7 @@ func (c *cfg) fromDisk() error {
     c.listener = lHost
     c.dialer = rHost
     c.worker = worker
-    c.rrFile = rrFile
+    c.rrDir = rrDir
     c.cacheUpdate = cUpd
     c.defaultDomain = dDom
     c.serverLog = sLog
