@@ -8,7 +8,9 @@ import (
     // golang.org -> cmd/vendor/golang.org
     "golang.org/x/sys/unix"
     "context"
-    "vella/fileops"
+    "strings"
+    "path/filepath"
+    "os"
 )
 
 // TODO signals to terminate
@@ -38,9 +40,6 @@ type Server struct {
     // local cache
     cache *Cache
 
-    // cache watcher
-    cacheWatch fileops.FileObj
-
     // server config
     cfg *cfg
 
@@ -67,25 +66,43 @@ func NewServer(config string, stdout bool) Server {
     cInfo, cWarn, cCrit, cDebg = NewHandles(conf.serverLog)
     sInfo, sWarn, sCrit, sDebg = NewHandles(conf.cacheLog)
 
+    // RR files
+    rf := make([]string, 0)
+    err = filepath.Walk(conf.rrDir, func(path string, fi os.FileInfo, err error) error {
+        if !fi.IsDir() {
+            if ok := rrx.MatchString(path); ok {
+                rf = append(rf, path)
+            }
+        }
+
+        return nil
+    })
+
+    w := make([]*fstat, len(rf))
+    for i, f := range rf {
+        w[i] = newFstat(f)
+    }
+
     sInfo.Printf("== Server Configuration ==")
     sInfo.Printf("Listener: %s", conf.localHostString())
     sInfo.Printf("Dialer: %s", conf.remoteHostString())
     sInfo.Printf("Workers: %d", conf.worker)
-    sInfo.Printf("Resource records (rr) file: %s", conf.rrFile)
+    sInfo.Printf("Resource records (rr) dir: %s", conf.rrDir)
+    sInfo.Printf("Resource records (rr) files: %s", strings.Join(rf, ", "))
     sInfo.Printf("Cache update: %s", conf.cacheUpdate)
     sInfo.Printf("Default domain: %s", conf.defaultDomain)
     sInfo.Printf("Server log: %s", conf.serverLog)
     sInfo.Printf("Cache log: %s", conf.cacheLog)
     sInfo.Printf("Debug: %v", conf.debug)
 
+    //
     // build up server
 
     srv := Server{
         make([]Worker, conf.worker),
         make(chan []byte, PACKET_PREP_Q_SIZE),
         make(chan string, PACKET_PREP_Q_SIZE),
-        NewCache(conf.rrFile, conf.defaultDomain),
-        fileops.NewWatcher(conf.rrFile),
+        NewCache(conf.defaultDomain, rf),
         conf,
         net.ListenConfig{
             Control: func (net, addr string, c syscall.RawConn) error {
@@ -120,15 +137,36 @@ func NewServer(config string, stdout bool) Server {
         }
     }(srv.dialer)
 
-    // cache watcher
-    go func(cw fileops.FileObj) {
-        for w := range cw.Comms() {
-            if w.Data() == fileops.File_chg {
-                srv.cache.Load(false)
-            }
-        }
-    }(srv.cacheWatch)
+    if srv.cfg.cacheUpdate == FILE_CHANGE {
+        // RR files watcher
+        go func(wf []*fstat, c *Cache) {
+            for {
+                reload := false
+                for _, f := range wf {
+                    s, err := stat(f.path)
+                    if err != nil {
+                        panic(err)
+                    }
 
+                    if ! f.equals(fstat{f.path, s.Ino, s.Ctim.Sec}) {
+                        // update
+                        f.inode = s.Ino
+                        f.ctime = s.Ctim.Sec
+
+                        reload = true
+                    }
+                }
+
+                if reload {
+                    c.Load(false)
+                }
+
+                time.Sleep(1 * time.Second)
+            }
+        }(w, srv.cache)
+    }
+
+    // workers
     for i:=0; i<srv.cfg.worker; i++ {
         l, err := srv.netcfg.ListenPacket(context.Background(), "udp4", srv.cfg.localNetConnString())
         if err !=  nil {

@@ -4,10 +4,11 @@ package main
 const (
     LOCAL_HOST      = "127.0.0.1:53"
     WORKER          = 3
-    LOCAL_RR        = "/etc/dns-proxy/resource-records.txt"
+    LOCAL_RR        = "/etc/dpx/rr.rr"
+    RR_DIR          = "/etc/dpx/rr.d"
     DEFAULT_DOMAIN  = "localnet"
-    SERVER_LOG      = "/var/log/dns-proxy/server.log"
-    CACHE_LOG       = "/var/log/dns-proxy/cache.log"
+    SERVER_LOG      = "/var/log/dpx/server.log"
+    CACHE_LOG       = "/var/log/dpx/cache.log"
 
     SERVER_RELOAD   = "on-server-reload"
     FILE_CHANGE     = "on-rr-file-change"
