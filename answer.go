@@ -407,7 +407,10 @@ func (a *Answer) setRespHeaders() {
     a.header[5] = QDCOUNT
 
     // AN count
-    a.header[7] = byte(len(a.rr))
+    // no answer for NXDOMAIN
+    if a.t != NXDOMAIN {
+        a.header[7] = byte(len(a.rr))
+    }
 
     // AR count
     a.header[11] = ARCOUNT + byte(len(a.addi))
