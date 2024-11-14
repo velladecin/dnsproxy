@@ -1,0 +1,17 @@
+[Unit]
+Description=DNS proxy
+Wants=network.target
+After=syslog.target network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/vella/go/path/src/vella/dns/main
+ExecStartPost=/bin/sh -c "/bin/pgrep main > /var/run/dpx.pid"
+ExecReload=/bin/sh -c "/bin/kill -s HUP $(/bin/cat /var/run/dpx.pid)"
+ExecStop=/bin/sh -c "/bin/kill -s TERM $(/bin/cat /var/run/dpx.pid)"
+Restart=on-failure
+RestartSec=5
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
