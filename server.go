@@ -11,6 +11,9 @@ import (
     "strings"
     "path/filepath"
     "os"
+    "os/signal"
+    "os/user"
+    "strconv"
 )
 
 // TODO signals to terminate
@@ -36,9 +39,9 @@ type Server struct {
     // prepares remote dialer strings (ip:port)
     // to use for upstream connection
     dialer chan string
-
+    
     // local cache
-    cache *Cache
+    //cache *Cache
 
     // server config
     cfg *cfg
@@ -67,10 +70,19 @@ func NewServer(config string, stdout bool) Server {
     sInfo, sWarn, sCrit, sDebg = NewHandles(conf.cacheLog)
 
     // RR files
+    // must be world readable otherwise 'nobody' will not
+    // be able to stat() the files for changes
+
     rf := make([]string, 0)
     err = filepath.Walk(conf.rrDir, func(path string, fi os.FileInfo, err error) error {
         if !fi.IsDir() {
             if ok := rrx.MatchString(path); ok {
+
+                fs := newFstat(path)
+                if !fs.worldReadable() {
+                    panic("Must be world readable: " + fs.path)
+                }
+
                 rf = append(rf, path)
             }
         }
@@ -78,16 +90,11 @@ func NewServer(config string, stdout bool) Server {
         return nil
     })
 
-    w := make([]*fstat, len(rf))
-    for i, f := range rf {
-        w[i] = newFstat(f)
-    }
-
     sInfo.Printf("== Server Configuration ==")
     sInfo.Printf("Listener: %s", conf.localHostString())
     sInfo.Printf("Dialer: %s", conf.remoteHostString())
     sInfo.Printf("Workers: %d", conf.worker)
-    sInfo.Printf("Resource records (rr) dir: %s", conf.rrDir)
+    //sInfo.Printf("Resource records (rr) dir: %s", conf.rrDir)
     sInfo.Printf("Resource records (rr) files: %s", strings.Join(rf, ", "))
     sInfo.Printf("Cache update: %s", conf.cacheUpdate)
     sInfo.Printf("Default domain: %s", conf.defaultDomain)
@@ -102,7 +109,6 @@ func NewServer(config string, stdout bool) Server {
         make([]Worker, conf.worker),
         make(chan []byte, PACKET_PREP_Q_SIZE),
         make(chan string, PACKET_PREP_Q_SIZE),
-        NewCache(conf.defaultDomain, rf),
         conf,
         net.ListenConfig{
             Control: func (net, addr string, c syscall.RawConn) error {
@@ -123,6 +129,49 @@ func NewServer(config string, stdout bool) Server {
         },
     }
 
+    cache := NewCache(conf.defaultDomain, rf)
+    cache.Dump()
+
+    // signals
+    sigch := make(chan os.Signal, 1)
+    signal.Notify(sigch, os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL, syscall.SIGHUP)
+    go func(ch chan os.Signal, c *Cache) {
+        for {
+            sig := <-ch
+            sInfo.Printf("Received signal: %s", sig)
+
+            if sig != syscall.SIGHUP {
+                // terminate
+
+                for i, w := range srv.procs {
+                    sInfo.Printf("Closing listener #%d", i+1) 
+                    w.listener.Close()
+                }
+
+                // Logger file handles are shared across Info, Warn, Crit, Debg
+                // therefore it's enough to close just one of them.
+                // logger.go will correctly deal with STDOUT handles
+
+                // cache logger
+                cInfo.Print("Closing cache logger handles")
+                cInfo.Close()
+
+                // server logger
+                sInfo.Print("Closing server logger handles")
+                sInfo.Print("Good Bye!")
+                sInfo.Close()
+                
+                os.Exit(0)
+            }
+
+            // reload cache
+            if srv.cfg.cacheUpdate == SERVER_RELOAD { 
+                sInfo.Printf("Reloading cache as per config")
+                c.Load(false)
+            }
+        }
+    }(sigch, cache)
+
     // packets
     go func(c chan []byte) {
         for {
@@ -137,7 +186,12 @@ func NewServer(config string, stdout bool) Server {
         }
     }(srv.dialer)
 
-    if srv.cfg.cacheUpdate == FILE_CHANGE {
+    if srv.cfg.cacheUpdate == FILE_CHANGE { 
+        w := make([]*fstat, len(rf))
+        for i, f := range rf {
+            w[i] = newFstat(f)
+        }
+
         // RR files watcher
         go func(wf []*fstat, c *Cache) {
             for {
@@ -148,7 +202,7 @@ func NewServer(config string, stdout bool) Server {
                         panic(err)
                     }
 
-                    if ! f.equals(fstat{f.path, s.Ino, s.Ctim.Sec}) {
+                    if ! f.equals(fstat{f.path, s.Ino, s.Ctim.Sec, s.Mode}) {
                         // update
                         f.inode = s.Ino
                         f.ctime = s.Ctim.Sec
@@ -163,7 +217,7 @@ func NewServer(config string, stdout bool) Server {
 
                 time.Sleep(1 * time.Second)
             }
-        }(w, srv.cache)
+        }(w, cache)
     }
 
     // workers
@@ -174,7 +228,7 @@ func NewServer(config string, stdout bool) Server {
         }
 
         sInfo.Printf("Listener #%d socket bind: %s", i+1, l.LocalAddr().String())
-        srv.procs[i] = Worker{l, i+1}
+        srv.procs[i] = Worker{l, cache, i+1}
     }
 
     return srv
@@ -182,10 +236,44 @@ func NewServer(config string, stdout bool) Server {
 
 func (s Server) Run() {
     for i, p := range s.procs {
-        go p.Accept(s.dialer, s.packet, s.cache)
+        go p.Accept(s.dialer, s.packet)
         sInfo.Printf("Listener #%d accepting connections", i+1)
     }
 
+    // drop server process privs down to nobody
+    // need to be able to read RR file(s)
+
+    uinfo, err := user.Lookup("nobody")
+    if err != nil {
+        panic(err)
+    }
+
+    // get uid, gid
+    uid, err := strconv.Atoi(uinfo.Uid)
+    if err != nil {
+        panic(err)
+    }
+    gid, err := strconv.Atoi(uinfo.Gid)
+    if err != nil {
+        panic(err)
+    }
+
+    // unset supplementary groups
+    err = syscall.Setgroups([]int{})
+    if err != nil {
+        panic(err)
+    }
+
+    // set uid/gid
+    err = syscall.Setgid(gid)
+    if err != nil {
+        panic(err)
+    }
+    err = syscall.Setuid(uid)
+    if err != nil {
+        panic(err)
+    }
+    
     for {
         time.Sleep(1*time.Second)
     }
@@ -200,11 +288,14 @@ type Worker struct {
     // local listener
     listener net.PacketConn
 
+    // cache
+    cache *Cache
+
     // worker id
     id int
 }
 
-func (w Worker) Accept(d chan string, p chan []byte, c *Cache) {
+func (w Worker) Accept(d chan string, p chan []byte) {
 
     // don't panic() in the below connections
     // client will just timeout
@@ -233,7 +324,7 @@ func (w Worker) Accept(d chan string, p chan []byte, c *Cache) {
         // check local cache or
         // contact remote/dialer
 
-        if a := c.Get(RequestType(query[0:ql]), qs); a != nil {
+        if a := w.cache.Get(RequestType(query[0:ql]), qs); a != nil {
             a.CopyRequestId(query)
             answer = a.serializePacket(answer)
 
