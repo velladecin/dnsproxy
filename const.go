@@ -127,3 +127,18 @@ const (
     CZ  = "a.ns.nic.cz. hostmaster.nic.cz."
     AU  = "q.au. hostmaster.donuts.email."
 )
+
+// file perms
+const (
+    ownerR  uint32 = 1<<8
+    ownerW  uint32 = 1<<7
+    ownerX  uint32 = 1<<6
+
+    groupR  uint32 = 1<<5
+    groupW  uint32 = 1<<4
+    groupX  uint32 = 1<<3
+
+    otherR  uint32 = 1<<2
+    otherW  uint32 = 1<<1
+    otherX  uint32 = 1<<0
+)

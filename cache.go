@@ -12,7 +12,6 @@ import (
 
 type Cache struct {
     // cache
-    //pool map[string]*Answer
     pool map[int]map[string]*Answer
 
     // cache reload lock
@@ -41,6 +40,15 @@ func NewCache(domain string, rrFiles []string) *Cache {
     return c
 }
 
+func (c *Cache) Dump() {
+    for t, rrs := range c.pool {
+        fmt.Printf(">>>> TYPE: %d\n", t)
+        for rr, answ := range rrs {
+            fmt.Printf("%s: %+v\n", rr, answ.rr)
+        }
+    }
+}
+
 // cache.Load() panics on errors on server start up
 // otherwise errors and won't update
 
@@ -59,7 +67,7 @@ func (c *Cache) Load(init bool) {
     //answers := make(map[int]map[string]*Answer)
     answers := map[int]map[string]*Answer{
         A: {},
-        CNAME: {},
+        CNAME: {}, 
         SOA: {},
         PTR: {},
         MX: {},
@@ -352,6 +360,8 @@ func (c *Cache) Get(t int, s string) *Answer {
     // safe read
     //c.mux.RLock()
     //defer c.mux.RUnlock()
+
+fmt.Printf(">>>>>>>>>> %d <> %s\n", t, s)
 
     if a, ok := c.pool[t][s]; ok {
         if debug {

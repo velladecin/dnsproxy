@@ -95,6 +95,9 @@ type cfg struct {
     // default domain
     defaultDomain string
 
+    // resolv.conf search
+    //resolvconf []string
+
     // logs
     serverLog string
     cacheLog string
@@ -117,7 +120,168 @@ func newCfg(config string) (*cfg, error) {
     return c, nil
 }
 
+func readFile(path string) ([]string, error) {
+    var lines []string
+
+    fh, err := os.Open(path)
+    if err != nil {
+        return nil, err
+    }
+    defer fh.Close()
+
+    scanner := bufio.NewScanner(fh)
+    for scanner.Scan() {
+        line := scanner.Text()
+
+        if ok := comment.MatchString(line); ok {
+            continue
+        }
+        if ok := empty.MatchString(line); ok {
+            continue
+        }
+
+        lines = append(lines, line)
+    }
+
+    if err := scanner.Err(); err != nil {
+        return nil, err
+    }
+
+    return lines, nil
+}
+
 func (c *cfg) fromDisk() error {
+    // defaults
+    lHost, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
+
+    lines, err := readFile(c.config)
+    if err != nil {
+        panic(err)
+    }
+
+    for _, line := range lines {
+        line = space.ReplaceAllString(line, "")
+
+        cs := strings.Split(line, "=")
+        if len(cs) != 2 {
+            return errors.New("Invalid config: " + line)
+        }
+
+        switch cs[0] {
+        case "listener":
+            h, err := newHosts(cs[1])
+            if err != nil {
+                return err
+            }
+
+            if len(h) != 1 {
+                return errors.New("listener must be single definition")
+            }
+
+            lHost = h[0]
+
+        case "dialer":
+            h, err := newHosts(cs[1])
+            if err != nil {
+                return err
+            }
+
+            rHost = h
+
+        case "workers":
+            i, err := strconv.Atoi(cs[1])
+            if err != nil {
+                return err
+            }
+
+            if i > WORKER_MAX {
+                return fmt.Errorf("workers over limit: %d, limit %d", i, WORKER_MAX)
+            }
+
+            worker = i
+
+        case "rr.dir":
+            // this file may or may not exist
+            // therefore do not check
+            rrDir = cs[1]
+
+        case "cache.update":
+            switch cs[1] {
+            case SERVER_RELOAD:
+            case FILE_CHANGE:
+            default:
+                return fmt.Errorf("cache.update unknown value: " + cs[1])
+            }
+            cUpd = cs[1]
+
+        case "default.domain":
+            // default domain limited
+            // to 256 chars
+            if len(cs[1]) > 256 {
+                return errors.New("default.domain definition too long")
+            }
+            dDom = cs[1]
+
+        // location check is bit further down
+        case "server.log":
+            sLog = cs[1]
+
+        case "cache.log":
+            cLog = cs[1]
+
+        case "debug":
+            if cs[1] != "on" && cs[1] != "off" {
+                return errors.New("debug unknown value: " + cs[1])
+            }
+
+            if cs[1] == "on" {
+                debug = true
+            }
+
+        default:
+            return errors.New("Unknown config option: " + line)
+        }
+    }
+
+    // make sure we can log
+    for _, d := range []string{filepath.Dir(sLog), filepath.Dir(cLog)} {
+        _, err := os.Stat(d)
+        if err != nil {
+            if os.IsNotExist(err) {
+                // does not exist
+                // is fine
+                if e := os.MkdirAll(d, os.ModePerm); e != nil {
+                    // could not create destination dir
+                    // is not fine
+                    return e
+                }
+
+                // success creating
+                // log destination dir
+                continue
+            }
+
+            // other err than not-exist
+            // is not fine
+            return err
+        }
+    }
+
+    // update config
+    c.listener = lHost
+    c.dialer = rHost
+    c.worker = worker
+    c.rrDir = rrDir
+    c.cacheUpdate = cUpd
+    c.defaultDomain = dDom
+    c.serverLog = sLog
+    c.cacheLog = cLog
+    c.debug = debug
+
+    return nil
+}
+
+func (c *cfg) fromDiskX() error {
     // defaults
     lHost, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
 
