@@ -467,9 +467,8 @@ func (a *Answer) CopyRequestId(q []byte) {
 }
 
 // updates an empty packet with full bytes as per (pre-cached) answer
-// using a previously declared p to hopefully save some time
-// yet, returning a sub slice which may be declaring a new slice anyways..?
-func (a *Answer) serializePacket(p []byte) []byte {
+// using a previously declared p to hopefully save some time and return length (of bytes)
+func (a *Answer) serializePacket(p []byte) int {
     i := 0
     for ; i<a.i; i++ {
         if i < HEADER_LEN {
@@ -479,7 +478,7 @@ func (a *Answer) serializePacket(p []byte) []byte {
         p[HEADER_LEN+i] = a.body[i]
     }
 
-    return p[:HEADER_LEN+i]
+    return HEADER_LEN+i
 }
 
 // strictly speaking IPs do not have labels. But for the sake of

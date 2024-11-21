@@ -33,6 +33,9 @@ const (
     // prep this many empty packets to handle incoming requests
     // at max workers this is 5 per worker
     PACKET_PREP_Q_SIZE = 100
+
+    // drop user when running
+    SERVICE_OWNER = "nobody"
 )
 
 

@@ -36,15 +36,16 @@ func NewCache(domain string, rrFiles []string) *Cache {
         domain,
     }
 
-    c.Load(true)
+    c.Init()
     return c
 }
 
 func (c *Cache) Dump() {
+    cInfo.Printf("=== CACHE DUMP ===\n")
     for t, rrs := range c.pool {
-        fmt.Printf(">>>> TYPE: %d\n", t)
+        cInfo.Printf("= TYPE: %s\n", RequestTypeString(t))
         for rr, answ := range rrs {
-            fmt.Printf("%s: %+v\n", rr, answ.rr)
+            cInfo.Printf("= %s: %+v\n", rr, answ.rr)
         }
     }
 }
@@ -52,7 +53,15 @@ func (c *Cache) Dump() {
 // cache.Load() panics on errors on server start up
 // otherwise errors and won't update
 
-func (c *Cache) Load(init bool) {
+func (c *Cache) Init() {
+    c.load(true)
+}
+
+func (c *Cache) Reload() {
+    c.load(false)
+}
+
+func (c *Cache) load(init bool) {
     if init {
         cInfo.Print("Initializing cache")
     } else {
@@ -361,14 +370,23 @@ func (c *Cache) Get(t int, s string) *Answer {
     //c.mux.RLock()
     //defer c.mux.RUnlock()
 
-fmt.Printf(">>>>>>>>>> %d <> %s\n", t, s)
-
     if a, ok := c.pool[t][s]; ok {
         if debug {
             cDebg.Printf("Found in cache: %s/%s", RequestTypeString(t), s)
         }
 
         return a
+    }
+
+    // look also in CNAME if A lookup
+    if t == A {
+        if a, ok := c.pool[CNAME][s]; ok {
+            if debug {
+                cDebg.Printf("Found in cache: %s/%s", "CNAME", s)
+            }
+
+            return a
+        }
     }
 
     if debug {
