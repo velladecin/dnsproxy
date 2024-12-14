@@ -132,6 +132,9 @@ const (
 )
 
 // file perms
+// https://github.com/phayes/permbits/blob/master/permbits.go
+// https://stackoverflow.com/questions/28969455/how-to-properly-instantiate-os-filemode
+// TODO: fix the casing on the below
 const (
     ownerR  uint32 = 1<<8
     ownerW  uint32 = 1<<7

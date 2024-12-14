@@ -2,7 +2,7 @@ package main
 
 import (
     "flag"
-    _"fmt"
+    "fmt"
 )
 
 var config string
@@ -19,6 +19,8 @@ func init() {
 
 func main() {
     //s := NewServer(config, debugx, stdout)
+    fmt.Println(config)
+    fmt.Println(stdout)
     s := NewServer(config, stdout)
     //fmt.Printf("%+v\n", s)
     s.Run()
