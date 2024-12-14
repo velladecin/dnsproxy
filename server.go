@@ -17,8 +17,6 @@ import (
     "sync"
 )
 
-// TODO signals to terminate
-
 // debug
 var debug bool
 
@@ -241,7 +239,7 @@ func (s Server) Run() {
     // drop server process privs down to nobody
     // NOTE: needs to be able to read RR files
 
-    sInfo.Printf("Server dropping system user to: %s", SERVICE_OWNER)
+    sInfo.Printf("Dropping dpx service user privs to: %s", SERVICE_OWNER)
     uinfo, err := user.Lookup(SERVICE_OWNER)
     if err != nil {
         panic(err)
@@ -396,7 +394,7 @@ func (w *Worker) processRequest(query, answer []byte, addr net.Addr) {
         answer = answer[0:al]
 
         // TODO fish out answer from upstream
-        sInfo.Printf("#%d, Resp id: %d, upstream: %s, len: %d", w.id, bytesToInt(answer[:2]), dialer.RemoteAddr().String(), al)
+        sInfo.Printf("#%d, Resp id: %d, upstream: %s, len: %d, answer: %s", w.id, bytesToInt(answer[:2]), dialer.RemoteAddr().String(), al, Response(answer))
     }
     
     if debug {
