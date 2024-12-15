@@ -4,8 +4,6 @@ import (
     "net"
     "time"
     "syscall"
-    // had to link in go-<ver>/src
-    // golang.org -> cmd/vendor/golang.org
     "golang.org/x/sys/unix"
     "context"
     "strings"
