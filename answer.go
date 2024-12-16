@@ -1,7 +1,6 @@
 package main
 
 import (
-_    "fmt"
     "strings"
     "regexp"
     "bytes"
@@ -53,13 +52,11 @@ func NewMx(q, mxhost string, cache map[int]map[string]*Answer) (*Answer, error) 
 
     // headers
     a.setRespHeaders()
-    //fmt.Printf("======> %+v\n", a.header)
 
     // question
     a.Question()
 
     // answer
-    //fmt.Printf("======> %+v\n", a.rr)
     a.labelize(a.QuestionString())
 
     a.body[a.i+1] = MX
@@ -99,9 +96,6 @@ func NewMx(q, mxhost string, cache map[int]map[string]*Answer) (*Answer, error) 
     }
 
     a.additional()
-
-    //fmt.Printf("+++>> %+v\n", a.body)
-
     return a, nil
 }
 
@@ -599,6 +593,11 @@ func (a *Answer) ResponseString() string {
 
 func (a *Answer) QandR() string {
     return a.QuestionString() + ", " + a.ResponseString()
+}
+
+// answer type in string
+func (a *Answer) Types() string {
+    return TypeString(a.t)
 }
 
 // The two below currently work only for uint16, uint32

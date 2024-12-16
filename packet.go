@@ -65,6 +65,11 @@ func RequestType(q []byte) int {
     return int(RequestTypeByte(q)[1])
 }
 
+func TypeString(i int) string {
+    return RequestTypeString(i)
+}
+
+// deprecated, move to TypeString(i)
 func RequestTypeString(i int) string {
     var s string
 
