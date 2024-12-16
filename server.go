@@ -4,6 +4,8 @@ import (
     "net"
     "time"
     "syscall"
+    // had to link in go-<ver>/src
+    // golang.org -> cmd/vendor/golang.org
     "golang.org/x/sys/unix"
     "context"
     "strings"
@@ -39,7 +41,7 @@ type Server struct {
 
 
 func NewServer(config string, stdout bool) Server {
-    conf, err := newCfg(config)
+    conf, warn, err := newCfg(config)
     if err != nil {
         panic(err)
     }
@@ -61,10 +63,19 @@ func NewServer(config string, stdout bool) Server {
     // be able to stat() the files for changes
 
     rf := make([]string, 0)
-    err = filepath.Walk(conf.rrDir, func(path string, fi os.FileInfo, err error) error {
+    // don't capture (returned) err from filepath.Walk
+    // as we panic() on all errors
+    filepath.Walk(conf.rrDir, func(path string, fi os.FileInfo, err error) error {
+        // this can only happen when rr.dir
+        // does not exist
+        if fi == nil {
+            panic("Cannot find: " + path)
+        }
+
+        // check first then work with .rr files here
+        // for that reason panic() is not expected on newFstat()
         if !fi.IsDir() {
             if ok := rrx.MatchString(path); ok {
-
                 fs := newFstat(path)
                 if !fs.worldReadable() {
                     panic("Must be world readable: " + fs.path)
@@ -77,9 +88,17 @@ func NewServer(config string, stdout bool) Server {
         return nil
     })
 
+    if warn != nil {
+        sWarn.Printf("== Server Configuration Warning ==")
+        for _, w := range warn {
+            sWarn.Print(w)
+        }
+    }
+
     sInfo.Printf("== Server Configuration ==")
     sInfo.Printf("Listener: %s", conf.localHostString())
-    sInfo.Printf("Dialer: %s", conf.remoteHostString())
+    sInfo.Printf("Proxy: %v", conf.proxy)
+    sInfo.Printf("Proxy dialer: %s", conf.remoteHostString())
     sInfo.Printf("Workers: %d", conf.worker)
     //sInfo.Printf("Resource records (rr) dir: %s", conf.rrDir)
     sInfo.Printf("Resource records (rr) files: %s", strings.Join(rf, ", "))
@@ -94,10 +113,7 @@ func NewServer(config string, stdout bool) Server {
 
     srv := Server{
         workers:  make([]*Worker, conf.worker),
-        //packet: make(chan []byte, PACKET_PREP_Q_SIZE),
         cfg:    conf,
-        //exit:   make(chan bool),
-        //exited: make(chan bool),
         netcfg: net.ListenConfig{
                     Control: func (net, addr string, c syscall.RawConn) error {
                         return c.Control(func(fd uintptr) {
@@ -207,16 +223,21 @@ func NewServer(config string, stdout bool) Server {
             for {
                 reload := false
                 for _, f := range wf {
-                    s, err := stat(f.path)
-                    if err != nil {
-                        panic(err)
+                    s := newFstat(f.path)
+                    if !s.exists() {
+                        // file disappeared, do nothing and log
+                        // TODO: this is very noisy and logs every second
+                        sCrit.Printf("RR file disappeared: " + s.path)
+                        reload = false
+                        break
                     }
 
-                    if ! f.equals(fstat{f.path, s.Ino, s.Ctim.Sec, s.Mode}) {
-                        // update
-                        f.inode = s.Ino
-                        f.ctime = s.Ctim.Sec
-
+                    // content change tracking
+                    // purely based on change time
+                    if f.ctime != s.ctime {
+                        // file changed
+                        // update f
+                        f.copy(s)
                         reload = true
                     }
                 }

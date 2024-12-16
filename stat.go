@@ -1,52 +1,46 @@
 package main
 
 import (
-    "io/fs"
+    iofs "io/fs"
     "syscall"
     "errors"
     "strings"
 )
-
-func stat(path string) (*syscall.Stat_t, error) {
-    var st syscall.Stat_t
-    err := syscall.Stat(path, &st)
-    if err != nil {
-        if ! errors.Is(err, fs.ErrNotExist) {
-            return nil, err
-        }
-    }
-
-    return &st, nil
-}
 
 type fstat struct {
     path string
     inode uint64
     ctime int64
     mode uint32
+    err error
 }
 
 func newFstat(path string) *fstat {
-    f, err := stat(path)
+    var st syscall.Stat_t
+
+    err := syscall.Stat(path, &st)
     if err != nil {
-        panic(err)
+        if ! errors.Is(err, iofs.ErrNotExist) {
+            panic(path + ": " + err.Error())
+        }
     }
 
-    return &fstat{path, f.Ino, f.Ctim.Sec, f.Mode}
+    return &fstat{path, st.Ino, st.Ctim.Sec, st.Mode, err}
 }
 
-func (fs *fstat) equals(f fstat) bool {
-    if fs.path != f.path {
-        return false
-    }
-    if fs.inode != f.inode {
-        return false
-    }
-    if fs.ctime != f.ctime {
+func (fs *fstat) exists() bool {
+    if errors.Is(fs.err, iofs.ErrNotExist) {
         return false
     }
 
     return true
+}
+
+func (fs *fstat) copy(f *fstat) {
+    fs.inode = f.inode
+    fs.ctime = f.ctime
+    fs.mode = f.mode
+    fs.err = f.err
 }
 
 func (fs *fstat) worldReadable() bool {

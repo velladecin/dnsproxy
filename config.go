@@ -28,6 +28,9 @@ type host struct {
 }
 
 func newHosts(s string) ([]host, error) {
+    // no want no spaces here
+    s = space.ReplaceAllString(s, "")
+
     var hosts []host
 
     for _, h := range strings.Split(s, ",") {
@@ -66,9 +69,10 @@ func (h host) netConnString() string {
 
 // Server config
 
-func defaultConfig() (host, []host, int, string, string, string, string, string, bool) {
+func defaultConfig() (host, bool, []host, int, string, string, string, string, string, bool) {
     lh, _ := newHosts(LOCAL_HOST)
-    return lh[0], make([]host, 0), WORKER, RR_DIR, SERVER_RELOAD, DEFAULT_DOMAIN, SERVER_LOG, CACHE_LOG, false
+    rh, _ := newHosts(fmt.Sprintf("%s, %s", REMOTE_HOST1, REMOTE_HOST2))
+    return lh[0], PROXY, rh, WORKER, RR_DIR, SERVER_RELOAD, DEFAULT_DOMAIN, SERVER_LOG, CACHE_LOG, DEBUG
 }
 
 type cfg struct {
@@ -104,20 +108,23 @@ type cfg struct {
 
     // debug
     debug bool
+
+    // proxy
+    proxy bool
 }
 
-func newCfg(config string) (*cfg, error) {
+func newCfg(config string) (*cfg, []string, error) {
     // default config
-    lHost, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
-    c := &cfg{config, lHost, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug}
+    lHost, proxy, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
+    c := &cfg{config, lHost, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug, proxy}
 
     // disk config
-    err := c.fromDisk()
+    warn, err := c.fromDisk()
     if err != nil {
-        return nil, err
+        return nil, warn, err
     }
 
-    return c, nil
+    return c, warn, err
 }
 
 func readFile(path string) ([]string, error) {
@@ -150,40 +157,51 @@ func readFile(path string) ([]string, error) {
     return lines, nil
 }
 
-func (c *cfg) fromDisk() error {
+func (c *cfg) fromDisk() ([]string, error) {
     // defaults
-    lHost, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
+    lHost, proxy, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
 
     lines, err := readFile(c.config)
     if err != nil {
         panic(err)
     }
 
+    warnings := make([]string, 0)
+    pd := false
     for _, line := range lines {
         line = space.ReplaceAllString(line, "")
 
         cs := strings.Split(line, "=")
         if len(cs) != 2 {
-            return errors.New("Invalid config: " + line)
+            return nil, errors.New("Invalid config: " + line)
         }
 
         switch cs[0] {
         case "listener":
             h, err := newHosts(cs[1])
             if err != nil {
-                return err
+                return nil, err
             }
 
             if len(h) != 1 {
-                return errors.New("listener must be single definition")
+                return nil, errors.New("'listener' must be single definition")
             }
 
             lHost = h[0]
 
-        case "dialer":
+        case "proxy":
+            if err := onOff(cs[1]); err != nil {
+                return nil, fmt.Errorf("'proxy' %s", err.Error())
+            }
+            if cs[1] == "off" {
+                proxy = false 
+            }
+
+        case "proxy.dialer":
+            pd = true
             h, err := newHosts(cs[1])
             if err != nil {
-                return err
+                return nil, err
             }
 
             rHost = h
@@ -191,18 +209,16 @@ func (c *cfg) fromDisk() error {
         case "workers":
             i, err := strconv.Atoi(cs[1])
             if err != nil {
-                return err
+                return nil, err
             }
 
             if i > WORKER_MAX {
-                return fmt.Errorf("workers over limit: %d, limit %d", i, WORKER_MAX)
+                return nil, fmt.Errorf("'workers' over limit: %d (max: %d)", i, WORKER_MAX)
             }
 
             worker = i
 
         case "rr.dir":
-            // this file may or may not exist
-            // therefore do not check
             rrDir = cs[1]
 
         case "cache.update":
@@ -210,7 +226,7 @@ func (c *cfg) fromDisk() error {
             case SERVER_RELOAD:
             case FILE_CHANGE:
             default:
-                return fmt.Errorf("cache.update unknown value: " + cs[1])
+                return nil, fmt.Errorf("cache.update unknown value: " + cs[1])
             }
             cUpd = cs[1]
 
@@ -218,7 +234,7 @@ func (c *cfg) fromDisk() error {
             // default domain limited
             // to 256 chars
             if len(cs[1]) > 256 {
-                return errors.New("default.domain definition too long")
+                return nil, errors.New("default.domain definition too long")
             }
             dDom = cs[1]
 
@@ -230,8 +246,8 @@ func (c *cfg) fromDisk() error {
             cLog = cs[1]
 
         case "debug":
-            if cs[1] != "on" && cs[1] != "off" {
-                return errors.New("debug unknown value: " + cs[1])
+            if err := onOff(cs[1]); err != nil {
+                return nil, fmt.Errorf("'debug' %s", err.Error()) 
             }
 
             if cs[1] == "on" {
@@ -239,8 +255,17 @@ func (c *cfg) fromDisk() error {
             }
 
         default:
-            return errors.New("Unknown config option: " + line)
+            return nil, errors.New("Unknown config option: " + line)
         }
+    }
+
+    // make sure rr.dir exists and world readable
+    rrstat := newFstat(rrDir)
+    if !rrstat.exists() {
+        panic(rrstat.err)
+    }
+    if !rrstat.worldReadable() {
+        panic("Permission denied, needs o+r: " + rrstat.path)
     }
 
     // make sure we can log
@@ -253,7 +278,7 @@ func (c *cfg) fromDisk() error {
                 if e := os.MkdirAll(d, os.ModePerm); e != nil {
                     // could not create destination dir
                     // is not fine
-                    return e
+                    return nil, e
                 }
 
                 // success creating
@@ -263,8 +288,12 @@ func (c *cfg) fromDisk() error {
 
             // other err than not-exist
             // is not fine
-            return err
+            return nil, err
         }
+    }
+
+    if !proxy && pd {
+        warnings = append(warnings, "'proxy' disabled and 'proxy.dialer' defined (will be ignored)")
     }
 
     // update config
@@ -277,8 +306,24 @@ func (c *cfg) fromDisk() error {
     c.serverLog = sLog
     c.cacheLog = cLog
     c.debug = debug
+    c.proxy = proxy
 
-    return nil
+    if len(warnings) > 0 {
+        return warnings, nil
+    }
+
+    return nil, nil
+}
+
+func onOff(s string) error {
+    var err error
+    switch s {
+    case "on", "off":
+    default:
+        err = errors.New("not valid (accepts: on/off)")
+    }
+
+    return err
 }
 
 // local host strings are the same

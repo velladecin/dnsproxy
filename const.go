@@ -3,12 +3,15 @@ package main
 // file config
 const (
     LOCAL_HOST      = "127.0.0.1:53"
+    PROXY           = true
+    REMOTE_HOST1    = "8.8.8.8:53"
+    REMOTE_HOST2    = "8.8.4.4:53"
     WORKER          = 3
-    LOCAL_RR        = "/etc/dpx/rr.rr"
     RR_DIR          = "/etc/dpx/rr.d"
     DEFAULT_DOMAIN  = "localnet"
     SERVER_LOG      = "/var/log/dpx/server.log"
     CACHE_LOG       = "/var/log/dpx/cache.log"
+    DEBUG           = false
 
     SERVER_RELOAD   = "on-server-reload"
     FILE_CHANGE     = "on-rr-file-change"
