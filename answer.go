@@ -392,6 +392,15 @@ func (a *Answer) Question() {
     a.i += 5
 }
 
+func (a *Answer) RespHeaders() {
+    a.Response()
+    a.RecursionDesired()
+    a.RecursionAvailable()
+
+    // QD count is always 1
+    a.header[5] = QDCOUNT
+}
+
 func (a *Answer) setRespHeaders() {
     // common headers
     a.header[2] |= RESP|RD
@@ -420,14 +429,24 @@ func (a *Answer) setRespHeaders() {
         //a.header[3] |= AA
 
         // RCODE Name Error
-        a.header[3] |= NXDOMAIN
+        //a.header[3] |= NXDOMAIN
+        a.RcodeNxdomain()
 
         // auth server count
         a.header[9] |= NSCOUNT
         return
     }
-
 }
+
+func (a *Answer) RcodeNxdomain() { a.SetRCODE(NXDOMAIN) }
+func (a *Answer) RcodeRefused()  { a.SetRCODE(REFUSED) }
+func (a *Answer) SetRCODE(i uint8) {
+    a.header[3] |= i
+}
+
+func (a *Answer) Response()             { a.header[2] |= RESP }
+func (a *Answer) RecursionDesired()     { a.header[2] |= RD }
+func (a *Answer) RecursionAvailable()   { a.header[3] |= RA }
 
 func (a *Answer) additional() {
     // this gives size of packet (length) if it is over the standard 512 bytes,

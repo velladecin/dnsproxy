@@ -156,7 +156,7 @@ func NewServer(config string, stdout bool) Server {
 
     // workers
     for i:=0; i<srv.cfg.worker; i++ {
-        w, err := NewWorker(srv.netcfg, srv.cfg.localNetConnString(), cache, packeter, dialer, i+1)
+        w, err := NewWorker(srv.netcfg, srv.cfg.localNetConnString(), srv.cfg.proxy, cache, packeter, dialer, i+1)
         if err != nil {
             panic(err)
         }
@@ -323,6 +323,9 @@ type Worker struct {
     // sync
     wg sync.WaitGroup
 
+    // proxy
+    proxy bool
+
     // shutdown request
     exit chan bool
 
@@ -333,7 +336,7 @@ type Worker struct {
     id int
 }
 
-func NewWorker(lcfg net.ListenConfig, iface string, c *Cache, p chan []byte, d chan string, id int) (*Worker, error) {
+func NewWorker(lcfg net.ListenConfig, iface string, x bool, c *Cache, p chan []byte, d chan string, id int) (*Worker, error) {
     l, err := lcfg.ListenPacket(context.Background(), "udp4", iface)
     if err != nil {
         return nil, err
@@ -347,6 +350,7 @@ func NewWorker(lcfg net.ListenConfig, iface string, c *Cache, p chan []byte, d c
         packeter:   p,
         dialer:     d,
         //wg:         sync.WaitGroup,
+        proxy:	    x,
         exit:       make(chan bool),
         exited:     make(chan bool),
         id:         id,
@@ -364,56 +368,64 @@ func (w *Worker) processRequest(query, answer []byte, addr net.Addr) {
         sDebg.Printf("#%d: Query id: %d, bytes: %+v", w.id, bytesToInt(query[:2]), query)
     }
 
-    // check local cache or
-    // contact remote/dialer
-
     // answer length
     al := 0
 
+    // check local cache
+    // and answer with what is found
     if a := w.cache.Get(rt, qs); a != nil {
         a.CopyRequestId(query)
         al = a.serializePacket(answer)
 
         sInfo.Printf("#%d: Resp id: %d, len: %d, answer: %s", w.id, bytesToInt(answer[:2]), al, a.ResponseString())
     } else {
-        dialer, err := net.Dial("udp4", <-w.dialer)
-        if err != nil {
+        // proxy mode
+        switch w.proxy {
+        case true:
+            // proxy on, dial upstream
+            dialer, err := net.Dial("udp4", <-w.dialer)
+            if err != nil {
+                if debug {
+                    sDebg.Printf("#%d: Failed to dial upstream: %s", w.id, err.Error())
+                }
+
+                return
+            }
+            defer dialer.Close()
+
             if debug {
-                sDebg.Printf("#%d: Failed to dial upstream: %s", w.id, err.Error())
+                sDebg.Printf("#%d: Dialing to upstream: %s", w.id, dialer.RemoteAddr().String())
             }
 
-            return
+            // upstream connection timeout
+            dialer.SetDeadline(time.Now().Add(time.Second * CONNECTION_TIMEOUT))
+
+            al, err = dialer.Write(query)
+            if err != nil {
+                sCrit.Printf("#%d: Failed to write query to upstream, written: %d, error: %s", w.id, al, err.Error())
+                return
+            }
+
+            if debug {
+                sDebg.Printf("#%d: Bytes written to dialer: %d", w.id, al)
+            }
+
+            al = 0
+            al, err = dialer.Read(answer)
+            if err != nil {
+                sCrit.Printf("#%d: Failed to read from upstream, read: %d, error: %s", w.id, al, err.Error())
+                return
+            }
+
+            sInfo.Printf("#%d, X-ON, Resp id: %d, upstream: %s, len: %d, answer: %s", w.id, bytesToInt(answer[:2]), dialer.RemoteAddr().String(), al, Response(answer))
+        case false:
+            // proxy off, refuse
+            a := NewNxdomain(qs)
+            a.CopyRequestId(query)
+            al = a.serializePacket(answer)
+
+            sInfo.Printf("#%d: X-OFF, Resp id: %d, len: %d, answer: %s", w.id, bytesToInt(answer[:2]), al, a.ResponseString())
         }
-        defer dialer.Close()
-
-        if debug {
-            sDebg.Printf("#%d: Dialing to upstream: %s", w.id, dialer.RemoteAddr().String())
-        }
-
-        // request timeout
-        dialer.SetDeadline(time.Now().Add(time.Second * CONNECTION_TIMEOUT))
-
-        al, err = dialer.Write(query)
-        if err != nil {
-            sCrit.Printf("#%d: Failed to write query to upstream, written: %d, error: %s", w.id, al, err.Error())
-            return
-        }
-
-        if debug {
-            sDebg.Printf("#%d: Bytes written to dialer: %d", w.id, al)
-        }
-
-        al = 0
-        al, err = dialer.Read(answer)
-        if err != nil {
-            sCrit.Printf("#%d: Failed to read from upstream, read: %d, error: %s", w.id, al, err.Error())
-            return
-        }
-
-        answer = answer[0:al]
-
-        // TODO fish out answer from upstream
-        sInfo.Printf("#%d, Resp id: %d, upstream: %s, len: %d, answer: %s", w.id, bytesToInt(answer[:2]), dialer.RemoteAddr().String(), al, Response(answer))
     }
     
     if debug {
