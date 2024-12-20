@@ -323,7 +323,7 @@ type Worker struct {
     // sync
     wg sync.WaitGroup
 
-    // proxy
+    // proxy mode
     proxy bool
 
     // shutdown request
@@ -350,7 +350,7 @@ func NewWorker(lcfg net.ListenConfig, iface string, x bool, c *Cache, p chan []b
         packeter:   p,
         dialer:     d,
         //wg:         sync.WaitGroup,
-        proxy:	    x,
+        proxy:      x,
         exit:       make(chan bool),
         exited:     make(chan bool),
         id:         id,
@@ -417,10 +417,18 @@ func (w *Worker) processRequest(query, answer []byte, addr net.Addr) {
                 return
             }
 
+            //answer = answer[0:al]
+
             sInfo.Printf("#%d, X-ON, Resp id: %d, upstream: %s, len: %d, answer: %s", w.id, bytesToInt(answer[:2]), dialer.RemoteAddr().String(), al, Response(answer))
         case false:
             // proxy off, refuse
+            /*
             a := NewNxdomain(qs)
+            a.CopyRequestId(query)
+            al = a.serializePacket(answer)
+            */
+
+            a := NewRefused(qs)
             a.CopyRequestId(query)
             al = a.serializePacket(answer)
 

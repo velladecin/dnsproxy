@@ -11,6 +11,7 @@ import (
 
 type Answer struct {
     // 1+N answer section
+    // rr[0][0] is (also) question
     rr [][]string
 
     // 1+N additional section
@@ -51,7 +52,7 @@ func NewMx(q, mxhost string, cache map[int]map[string]*Answer) (*Answer, error) 
     }
 
     // headers
-    a.setRespHeaders()
+    a.RespHeaders()
 
     // question
     a.Question()
@@ -132,7 +133,7 @@ func NewCname(q string, r []string, cache map[int]map[string]*Answer) (*Answer, 
     a.rr = append(a.rr, cache[A][last].rr...)
 
     // headers
-    a.setRespHeaders()
+    a.RespHeaders()
 
     // question
     a.Question()
@@ -201,7 +202,7 @@ func NewPtr(q, soa string) *Answer {
     }
 
     // headers
-    a.setRespHeaders()
+    a.RespHeaders()
 
     // question
     a.Question()
@@ -254,7 +255,7 @@ func NewA(h string, ip []string) (*Answer, error) {
     }
 
     // headers
-    a.setRespHeaders()
+    a.RespHeaders()
 
     // question
     a.Question()
@@ -280,6 +281,24 @@ func NewA(h string, ip []string) (*Answer, error) {
     return a, nil
 }
 
+func NewRefused(q string) *Answer {
+    // only question rr[0][0]
+    // is needed here
+    a := &Answer{[][]string{[]string{q, ""}},
+                 make([][]string, 0),
+                 make([]byte, HEADER_LEN),
+                 make([]byte, PACKET_SIZE-HEADER_LEN),
+                 make(map[string]int),
+                 0,
+                 A}
+
+    a.RefusedHeaders()
+    a.Question()
+    a.additional()
+
+    return a
+}
+
 func NewNxdomain(q string) *Answer {
     a := &Answer{make([][]string, 1),
                  make([][]string, 0),
@@ -289,7 +308,7 @@ func NewNxdomain(q string) *Answer {
                  0,
                  NXDOMAIN}
 
-    a.setRespHeaders()
+    a.NxdomainHeaders()
 
     lbl := strings.Split(q, ".")
 
@@ -392,54 +411,47 @@ func (a *Answer) Question() {
     a.i += 5
 }
 
-func (a *Answer) RespHeaders() {
+func (a *Answer) commonHeaders() {
     a.Response()
     a.RecursionDesired()
     a.RecursionAvailable()
 
     // QD count is always 1
     a.header[5] = QDCOUNT
+
+    // AR count
+    a.header[11] = ARCOUNT + byte(len(a.addi))
 }
 
-func (a *Answer) setRespHeaders() {
-    // common headers
-    a.header[2] |= RESP|RD
-    a.header[3] |= RA
+func (a *Answer) RespHeaders() {
+    a.commonHeaders()
+
+    // AN count
+    a.header[7] = byte(len(a.rr))
+}
+
+func (a *Answer) NxdomainHeaders() {
+    a.commonHeaders()
+    a.RcodeNxdomain()
+
+    // auth server count
+    a.header[9] |= NSCOUNT
+}
+
+func (a *Answer) RefusedHeaders() {
+    a.Response()
+    a.RecursionDesired()
+    a.RcodeRefused()
 
     // QD count is always 1
     a.header[5] = QDCOUNT
 
-    // AN count
-    // no answer for NXDOMAIN
-    if a.t != NXDOMAIN {
-        a.header[7] = byte(len(a.rr))
-    }
-
     // AR count
     a.header[11] = ARCOUNT + byte(len(a.addi))
-
-    if a.t == NXDOMAIN {
-        // NXDOMAIN headers
-
-        // TODO authoritative
-        // this breaks query status, not sure why exactly..
-        // status: NXDOMAIN
-        // vs
-        // status: YXRRSET
-        //a.header[3] |= AA
-
-        // RCODE Name Error
-        //a.header[3] |= NXDOMAIN
-        a.RcodeNxdomain()
-
-        // auth server count
-        a.header[9] |= NSCOUNT
-        return
-    }
 }
 
 func (a *Answer) RcodeNxdomain() { a.SetRCODE(NXDOMAIN) }
-func (a *Answer) RcodeRefused()  { a.SetRCODE(REFUSED) }
+func (a *Answer) RcodeRefused() { a.SetRCODE(REFUSED) }
 func (a *Answer) SetRCODE(i uint8) {
     a.header[3] |= i
 }
