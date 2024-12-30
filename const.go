@@ -6,7 +6,8 @@ const (
     PROXY           = true
     REMOTE_HOST1    = "8.8.8.8:53"
     REMOTE_HOST2    = "8.8.4.4:53"
-    WORKER          = 3
+    WORKER_UDP      = 3
+    WORKER_TCP      = 1
     RR_DIR          = "/etc/dpx/rr.d"
     DEFAULT_DOMAIN  = "localnet"
     SERVER_LOG      = "/var/log/dpx/server.log"

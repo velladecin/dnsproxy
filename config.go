@@ -69,10 +69,10 @@ func (h host) netConnString() string {
 
 // Server config
 
-func defaultConfig() (host, bool, []host, int, string, string, string, string, string, bool) {
+func defaultConfig() (host, bool, []host, int, int, string, string, string, string, string, bool) {
     lh, _ := newHosts(LOCAL_HOST)
     rh, _ := newHosts(fmt.Sprintf("%s, %s", REMOTE_HOST1, REMOTE_HOST2))
-    return lh[0], PROXY, rh, WORKER, RR_DIR, SERVER_RELOAD, DEFAULT_DOMAIN, SERVER_LOG, CACHE_LOG, DEBUG
+    return lh[0], PROXY, rh, WORKER_UDP, WORKER_TCP, RR_DIR, SERVER_RELOAD, DEFAULT_DOMAIN, SERVER_LOG, CACHE_LOG, DEBUG
 }
 
 type cfg struct {
@@ -88,7 +88,8 @@ type cfg struct {
     dialer []host
 
     // local workers (listeners)
-    worker int
+    workerUDP int
+    workerTCP int
 
     // Resource Records dir
     rrDir string
@@ -115,8 +116,8 @@ type cfg struct {
 
 func newCfg(config string) (*cfg, []string, error) {
     // default config
-    lHost, proxy, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
-    c := &cfg{config, lHost, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug, proxy}
+    lHost, proxy, rHost, wUdp, wTcp, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
+    c := &cfg{config, lHost, rHost, wUdp, wTcp, rrDir, cUpd, dDom, sLog, cLog, debug, proxy}
 
     // disk config
     warn, err := c.fromDisk()
@@ -159,7 +160,7 @@ func readFile(path string) ([]string, error) {
 
 func (c *cfg) fromDisk() ([]string, error) {
     // defaults
-    lHost, proxy, rHost, worker, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
+    lHost, proxy, rHost, wUdp, wTcp, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
 
     lines, err := readFile(c.config)
     if err != nil {
@@ -206,17 +207,29 @@ func (c *cfg) fromDisk() ([]string, error) {
 
             rHost = h
 
-        case "workers":
+        case "worker.udp":
             i, err := strconv.Atoi(cs[1])
             if err != nil {
                 return nil, err
             }
 
             if i > WORKER_MAX {
-                return nil, fmt.Errorf("'workers' over limit: %d (max: %d)", i, WORKER_MAX)
+                return nil, fmt.Errorf("'worker.udp' over limit: %d (max: %d)", i, WORKER_MAX)
             }
 
-            worker = i
+            wUdp = i
+
+        case "worker.tcp":
+            i, err := strconv.Atoi(cs[1])
+            if err != nil {
+                return nil, err
+            }
+
+            if i > WORKER_MAX {
+                return nil, fmt.Errorf("'worker.tcp' over limit: %d (max: %d)", i, WORKER_MAX)
+            }
+
+            wTcp = i
 
         case "rr.dir":
             rrDir = cs[1]
@@ -299,7 +312,8 @@ func (c *cfg) fromDisk() ([]string, error) {
     // update config
     c.listener = lHost
     c.dialer = rHost
-    c.worker = worker
+    c.workerUDP = wUdp
+    c.workerTCP = wTcp
     c.rrDir = rrDir
     c.cacheUpdate = cUpd
     c.defaultDomain = dDom
