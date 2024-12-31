@@ -51,8 +51,8 @@ func NewServer(config string, stdout bool) Server {
         conf.cacheLog = STDOUT
     }
 
-    cInfo, cWarn, cCrit, cDebg = NewHandles(conf.serverLog)
-    sInfo, sWarn, sCrit, sDebg = NewHandles(conf.cacheLog)
+    cInfo, cWarn, cCrit, cDebg = NewHandles(conf.cacheLog)
+    sInfo, sWarn, sCrit, sDebg = NewHandles(conf.serverLog)
 
     // RR files
     // must be world readable otherwise 'nobody' will not

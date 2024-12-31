@@ -483,8 +483,7 @@ func (a *Answer) additional() {
 // copy request ID into local answer
 func (a *Answer) CopyRequestId(q []byte) {
     if debug {
-        // TODO add the actual ID here
-        cDebg.Print("Updating packet header with request ID: " + a.QandR())
+        cDebg.Printf("Query id: %d, copying query id to answer: %s", bytesToInt(q[:2]), a.QandR())
     }
 
     a.header[0] = q[0]
