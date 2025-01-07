@@ -4,6 +4,8 @@ import (
     "net"
     "time"
     "syscall"
+    // had to link in go-<ver>/src
+    // golang.org -> cmd/vendor/golang.org
     "golang.org/x/sys/unix"
     "strings"
     "path/filepath"
@@ -92,6 +94,7 @@ func NewServer(config string, stdout bool) Server {
         }
     }
 
+    /*
     sInfo.Printf("== Server Configuration ==")
     sInfo.Printf("Listener: %s", conf.localHostString())
     sInfo.Printf("Proxy: %v", conf.proxy)
@@ -105,30 +108,64 @@ func NewServer(config string, stdout bool) Server {
     sInfo.Printf("Server log: %s", conf.serverLog)
     sInfo.Printf("Cache log: %s", conf.cacheLog)
     sInfo.Printf("Debug: %v", conf.debug)
+    */
+
+    sInfo.Printf("== Server Configuration ==")
+    sInfo.Printf("Proxy: %v", conf.proxy)
+
+    // listeners, dialers setup based on
+    // availability of IPv4/6 and config of the same
+    if conf.validNet4() {
+        sInfo.Printf("Listener v4: %s", strings.Join(conf.localNetConnString4(), ", "))
+    }
+
+    if conf.validNet6() {
+        sInfo.Printf("Listener v6: %s", strings.Join(conf.localNetConnString6(), ", "))
+    }
+
+    if conf.proxy {
+        if conf.validNet4() {
+            sInfo.Printf("Proxy dialer v4: %s", strings.Join(conf.remoteNetConnString4(), ", "))
+        }
+        if conf.validNet6() {
+            sInfo.Printf("Proxy dialer v6: %s", strings.Join(conf.remoteNetConnString6(), ", "))
+        }
+    }
+    sInfo.Printf("UDP Workers: %d", conf.workerUDP)
+    sInfo.Printf("TCP Workers: %d", conf.workerTCP)
+    //sInfo.Printf("Resource records (rr) dir: %s", conf.rrDir)
+    sInfo.Printf("Resource records (rr) files: %s", strings.Join(rf, ", "))
+    sInfo.Printf("Cache update: %s", conf.cacheUpdate)
+    sInfo.Printf("Default domain: %s", conf.defaultDomain)
+    sInfo.Printf("Server log: %s", conf.serverLog)
+    sInfo.Printf("Cache log: %s", conf.cacheLog)
+    sInfo.Printf("Debug: %v", conf.debug)
 
     //
     // build up server
 
+    // TODO work out if v6 available
     srv := Server{
-        worker: make([]Worker, conf.workerUDP + conf.workerTCP),
+        //worker: make([]Worker, (conf.workerUDP+conf.workerTCP)*2), // *2 = v4 + v6
+        worker: make([]Worker, 0),
         cfg:    conf,
         netcfg: net.ListenConfig{
-                    Control: func (net, addr string, c syscall.RawConn) error {
-                        return c.Control(func(fd uintptr) {
-                            // SO_REUSEADDR
-                            err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
-                            if err != nil {
-                                panic(err)
-                            }
+            Control: func (net, addr string, c syscall.RawConn) error {
+                return c.Control(func(fd uintptr) {
+                    // SO_REUSEADDR
+                    err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
+                    if err != nil {
+                        panic(err)
+                    }
 
-                            // SO_REUSEPORT
-                            err = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
-                            if err != nil {
-                                panic(err)
-                            }
-                        })
-                    },
-                },
+                    // SO_REUSEPORT
+                    err = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+                    if err != nil {
+                        panic(err)
+                    }
+                })
+            },
+        },
     }
 
     cache := NewCache(conf.defaultDomain, rf)
@@ -136,13 +173,33 @@ func NewServer(config string, stdout bool) Server {
         cache.Dump()
     }
 
-    // dialer
+    // dialers
+    // do these regardless of proxy
+    // as they simply won't be used
+    d4 := make(chan string, DIALER_PREP_Q_SIZE)
+    d6 := make(chan string, DIALER_PREP_Q_SIZE)
+    if conf.proxy {
+        go func(d chan string) {
+            for {
+                d <- srv.cfg.remoteNetConnDialer4()
+            }
+        }(d4)
+
+        go func(d chan string) {
+            for {
+                d <- srv.cfg.remoteNetConnDialer6()
+            }
+        }(d6)
+    }
+
+    /*
     dialer := make(chan string, PACKET_PREP_Q_SIZE)
     go func(d chan string) {
         for {
             d <- srv.cfg.remoteNetConnString()
         }
     }(dialer)
+    */
 
     // packeter
     packeter := make(chan []byte, PACKET_PREP_Q_SIZE)
@@ -152,7 +209,68 @@ func NewServer(config string, stdout bool) Server {
         }
     }(packeter)
 
-    // workers
+    // start worker on each
+    // configured net interface
+
+    j := 0
+    for i:=0; i<conf.workerUDP; i++ {
+        if conf.validNet4() {
+            for _, iface := range srv.cfg.localNetConnString4() {
+                w := NewWorkerUDP()
+                err := w.Start4(srv.netcfg, iface, srv.cfg.proxy, cache, packeter, d4, j)
+                if err != nil {
+                    panic(err)
+                }
+
+                srv.worker = append(srv.worker, w)
+                j++
+            }
+        }
+
+        if conf.validNet6() {
+            for _, iface := range srv.cfg.localNetConnString6() {
+                w := NewWorkerUDP()
+                err := w.Start6(srv.netcfg, iface, srv.cfg.proxy, cache, packeter, d6, j)
+                if err != nil {
+                    panic(err)
+                }
+
+                srv.worker = append(srv.worker, w)
+                j++
+            }
+        }
+    }
+
+    for i:=0; i<conf.workerTCP; i++ {
+        if conf.validNet4() {
+            for _, iface := range srv.cfg.localNetConnString4() {
+                w := NewWorkerTCP()
+                err := w.Start4(srv.netcfg, iface, srv.cfg.proxy, cache, packeter, d4, j)
+                if err != nil {
+                    panic(err)
+                }
+
+                srv.worker = append(srv.worker, w)
+                j++
+            }
+        }
+
+        if conf.validNet6() {
+            for _, iface := range srv.cfg.localNetConnString6() {
+                w := NewWorkerTCP()
+                err := w.Start6(srv.netcfg, iface, srv.cfg.proxy, cache, packeter, d6, j)
+                if err != nil {
+                    panic(err)
+                }
+
+                srv.worker = append(srv.worker, w)
+                j++
+            }
+        }
+    }
+
+
+    /*
     for i:=0; i<len(srv.worker); i++ {
         var w Worker
         var err error
@@ -170,6 +288,7 @@ func NewServer(config string, stdout bool) Server {
 
         srv.worker[i] = w
     }
+    */
 
     // signals
 
@@ -293,7 +412,7 @@ func (s Server) Run() {
     // start listening for connections
     for i, w := range s.worker {
         go w.ServeDNS()
-        sInfo.Printf("Listener #%d accepting %s connections", i+1, w.Type())
+        sInfo.Printf("Listener #%d accepting %s connections on %s", i+1, w.Type(), w.ListenAddr().String())
     }
 
     // keep server running

@@ -2,10 +2,13 @@ package main
 
 // file config
 const (
-    LOCAL_HOST      = "127.0.0.1:53"
+    LOCAL_HOST4     = "127.0.0.1:53"
+    LOCAL_HOST6     = "[::1]:53"
     PROXY           = true
-    REMOTE_HOST1    = "8.8.8.8:53"
-    REMOTE_HOST2    = "8.8.4.4:53"
+    REMOTE_HOST41   = "8.8.8.8:53"  // google.
+    REMOTE_HOST42   = "8.8.4.4:53"  // dns (v4)
+    REMOTE_HOST61   = "[2001:4860:4860::8844]:53"   // google.
+    REMOTE_HOST62   = "[2001:4860:4860::8888]:53"   // dns (v6)
     WORKER_UDP      = 3
     WORKER_TCP      = 1
     RR_DIR          = "/etc/dpx/rr.d"
@@ -38,8 +41,15 @@ const (
     // at max workers this is 5 per worker
     PACKET_PREP_Q_SIZE = 100
 
+    // prep this many connection strings for upsream dialing
+    DIALER_PREP_Q_SIZE = 50
+
     // drop user when running
     SERVICE_OWNER = "nobody"
+
+    // net
+    IPv4 = "ipv4"
+    IPv6 = "ipv6"
 )
 
 

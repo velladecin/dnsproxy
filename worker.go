@@ -1,6 +1,7 @@
 package main
 
 import (
+    "fmt"
     "sync"
     "net"
     "context"
@@ -8,10 +9,12 @@ import (
 )
 
 type Worker interface {
-    Start(net.ListenConfig, string, bool, *Cache, chan []byte, chan string, int) error
+    Start4(net.ListenConfig, string, bool, *Cache, chan []byte, chan string, int) error
+    Start6(net.ListenConfig, string, bool, *Cache, chan []byte, chan string, int) error
     ServeDNS()
     Close()
     Type() string
+    ListenAddr() net.Addr
 }
 
 type WorkerCommon struct {
@@ -38,6 +41,9 @@ type WorkerCommon struct {
 
     // worker id
     id int
+
+    // ipv4/ipv6
+    net string
 }
 
 //
@@ -58,8 +64,28 @@ func (w *WorkerUDP) Type() string {
     return "UDP"
 }
 
-func (w *WorkerUDP) Start(lc net.ListenConfig, iface string, x bool, c *Cache, p chan []byte, d chan string, id int) error {
-    l, err := lc.ListenPacket(context.Background(), "udp4", iface)
+func (w *WorkerUDP) ListenAddr() net.Addr {
+    return w.listener.LocalAddr()
+}
+
+func (w *WorkerUDP) Start4(lc net.ListenConfig, iface string, x bool, c *Cache, p chan []byte, d chan string, id int) error {
+    return w.Start(lc, iface, x, c, p, d, id, IPv4)
+}
+
+func (w *WorkerUDP) Start6(lc net.ListenConfig, iface string, x bool, c *Cache, p chan []byte, d chan string, id int) error {
+    return w.Start(lc, iface, x, c, p, d, id, IPv6)
+}
+
+func (w *WorkerUDP) Start(lc net.ListenConfig, iface string, x bool, c *Cache, p chan []byte, d chan string, id int, net string) error {
+    var lnet string
+    switch net {
+    case IPv4: lnet = "udp4"
+    case IPv6: lnet = "udp6"
+    default:
+        return fmt.Errorf("Uknown net: %s", net)
+    }
+
+    l, err := lc.ListenPacket(context.Background(), lnet, iface)
     if err != nil {
         return err
     }
@@ -74,6 +100,17 @@ func (w *WorkerUDP) Start(lc net.ListenConfig, iface string, x bool, c *Cache, p
     w.id = id
 
     return nil
+}
+
+func (w *WorkerUDP) Close() {
+    // exit request
+    close(w.exit)
+
+    // close listening socket
+    w.listener.Close()
+
+    // exit confirmation
+    <-w.exited
 }
 
 func (w *WorkerUDP) ServeDNS() {
@@ -113,17 +150,6 @@ func (w *WorkerUDP) ServeDNS() {
     }
 }
 
-func (w *WorkerUDP) Close() {
-    // exit request
-    close(w.exit)
-
-    // close listening socket
-    w.listener.Close()
-
-    // exit confirmation
-    <-w.exited
-}
-
 
 //
 // TCP
@@ -143,8 +169,28 @@ func (w *WorkerTCP) Type() string {
     return "TCP"
 }
 
-func (w *WorkerTCP) Start(lc net.ListenConfig, iface string, x bool, c *Cache, p chan []byte, d chan string, id int) error {
-    l, err := lc.Listen(context.Background(), "tcp4", iface)
+func (w *WorkerTCP) ListenAddr() net.Addr {
+    return w.listener.Addr()
+}
+
+func (w *WorkerTCP) Start4(lc net.ListenConfig, iface string, x bool, c *Cache, p chan []byte, d chan string, id int) error {
+    return w.Start(lc, iface, x, c, p, d, id, IPv4)
+}
+
+func (w *WorkerTCP) Start6(lc net.ListenConfig, iface string, x bool, c *Cache, p chan []byte, d chan string, id int) error {
+    return w.Start(lc, iface, x, c, p, d, id, IPv6)
+}
+
+func (w *WorkerTCP) Start(lc net.ListenConfig, iface string, x bool, c *Cache, p chan []byte, d chan string, id int, net string) error {
+    var lnet string
+    switch net {
+    case IPv4: lnet = "tcp4"
+    case IPv6: lnet = "tcp6"
+    default:
+        return fmt.Errorf("Uknown net: %s", net)
+    }
+
+    l, err := lc.Listen(context.Background(), lnet, iface)
     if err != nil {
         return err
     }
@@ -157,8 +203,20 @@ func (w *WorkerTCP) Start(lc net.ListenConfig, iface string, x bool, c *Cache, p
     w.exit = make(chan bool)
     w.exited = make(chan bool)
     w.id = id
+    w.net = net
 
     return nil
+}
+
+func (w *WorkerTCP) Close() {
+    // exit request
+    close(w.exit)
+
+    // close listening socket
+    w.listener.Close()
+
+    // exit confirmation
+    <-w.exited
 }
 
 func (w WorkerTCP) ServeDNS() {
@@ -200,17 +258,6 @@ func (w WorkerTCP) ServeDNS() {
                 w.wg.Done()
         }(query[0:ql], <-w.packeter, w.cache, <-w.dialer, w.proxy, w.id, conn)
     }
-}
-
-func (w *WorkerTCP) Close() {
-    // exit request
-    close(w.exit)
-
-    // close listening socket
-    w.listener.Close()
-
-    // exit confirmation
-    <-w.exited
 }
 
 func ProcessQuery(query, answer []byte, cache *Cache, dialer string, proxy bool, wid int) []byte {

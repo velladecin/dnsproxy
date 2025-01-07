@@ -7,28 +7,22 @@ import (
     "encoding/hex"
 )
 
-func ipv6StoB(ip string) []byte {
+// ipv6 is 8 nibbles, separated by :[:]
+// ::1
+// 0000:0000:0000:0000:0000:0000:0000:0001
+// 8x4 = 32 + 7 = 39
+var rIp6 = regexp.MustCompile(`^[a-f0-9\:]{3,39}$`)
+var rIp6full = regexp.MustCompile(`^[a-f0-9]{32}$`)
+
+func ipv6StoB(ip string) ([]byte, error) {
     ip = strings.ToLower(ip)
 
-    // no :, must be full length
-    if ok, _ := regexp.MatchString(`\:`, ip); !ok {
-        // must be 32 length
-        if ok, _ := regexp.MatchString(`^[a-f0-9]{32}$`, ip); !ok {
-            panic("bad IPv6: " + ip)
-        }
-
-        b, err := hex.DecodeString(ip)
-        if err != nil {
-            panic(err)
-        }
-
-        return b
+    if ok := rIp6full.MatchString(ip); ok {
+        return hex.DecodeString(ip)
     }
 
-    // ipv6 = 8 nibbles, separated by :[:] (up to 7 of them)
-    // 8x4 = 32 + 7 = 39
-    if ok, _ := regexp.MatchString(`^[a-f0-9\:]{3,39}$`, ip); !ok {
-        panic("bad IPv6: " + ip)
+    if ok := rIp6.MatchString(ip); !ok {
+        return nil, fmt.Errorf("Invalid IPv6 addr: %s", ip)
     }
 
     nibble := strings.Split(ip, ":")
@@ -57,26 +51,22 @@ func ipv6StoB(ip string) []byte {
                 missing_nibbles[j] = "0"
             }
 
+            // populate ::
             nibble = append(nibble[:i], append(missing_nibbles, nibble[i+1:]...)...)
             break
         }
     }
 
-    var ip6 string
+    var ip6s string
     for _, v := range nibble {
         if len(v) != 4 {
             v = fmt.Sprintf("%04s", v)
         }
 
-        ip6 += v
+        ip6s += v
     }
 
-    b, err := hex.DecodeString(ip6)
-    if err != nil {
-        panic(err)
-    }
-
-    return b
+    return hex.DecodeString(ip6s)
 }
 
 func ipv6BtoS(ip []byte, full bool) string {
@@ -136,4 +126,21 @@ func ipv6BtoS(ip []byte, full bool) string {
     }
 
     return strings.Join(s, ":")
+}
+
+func localIface6() []string {
+    var i6 []string
+
+    for _, i := range localIface() {
+        if rIp6.MatchString(i) {
+            i6 = append(i6, i)
+        }
+    }
+
+    return i6
+}
+
+func isIpv6() bool {
+    i6 := localIface6()
+    return len(i6) > 0
 }

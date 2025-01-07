@@ -17,75 +17,152 @@ var comment = regexp.MustCompile(`^\s*#`)
 var space   = regexp.MustCompile(`\s+`)
 var empty   = regexp.MustCompile(`^\s*$`)
 var comma   = regexp.MustCompile(`,`)
-var ip4     = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
+//var ip4     = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
 var rrx     = regexp.MustCompile(`\.rr$`)
+
+type warning []string
 
 // Host config
 
 type host struct {
     name string
     port int
+    proto string
 }
 
-func newHosts(s string) ([]host, error) {
-    // no want no spaces here
-    s = space.ReplaceAllString(s, "")
+// Accepts ipv4 net definiton
+// ip.ad.d.r:port, port is optional
+func NewHost4(s string) (host, error) {
+    ip4a := regexp.MustCompile(`^(\d+\.\d+\.\d+\.\d+)\:?(\d+)?$`)
 
-    var hosts []host
+    // ensure to have ip/port values
+    // leave full ip validation to the listener
+    var i string
+    var p int
+    var m []string
 
-    for _, h := range strings.Split(s, ",") {
-        hs := strings.Split(h, ":")
-
-        if hs[0] != "" {
-            if ok := ip4.MatchString(hs[0]); !ok {
-                return nil, errors.New("Invalid IP: " + hs[0])
-            }
-        }
-
-        port := DNS_PORT
-        if hs[1] != "" {
-            i, err := strconv.Atoi(hs[1])
-            if err != nil {
-                return nil, err
-            }
-
-            if i < PORT_MIN || i > PORT_MAX {
-                return nil, errors.New("Port out of range: " + hs[1])
-            }
-
-            port = i
-        }
-
-        hosts = append(hosts, host{hs[0], port})
+    if m = ip4a.FindStringSubmatch(s); m == nil {
+        return host{}, fmt.Errorf("Invalid IPv4 net: %s", s)
     }
 
-    return hosts, nil
+    i = m[1]
+    if m[2] == "" {
+        p = DNS_PORT
+    } else {
+        // convert
+        // don't need to catch err
+        p, _ = strconv.Atoi(m[2])
+    }
+
+    return NewHost(i, p, IPv4)
+}
+
+// Accepts ipv6 net definition
+// [ip]:port, port is optional
+// ip (without [])
+func NewHost6(s string) (host, error) {
+    ip6a := regexp.MustCompile(`^\[([a-f0-9\:]{3,39})\]:?(\d+)?$`)
+    ip6b := regexp.MustCompile(`^([a-f0-9\:]{3,39})$`)
+
+    // ensure to have ip/port values
+    // leave full ip validation to the listener
+    var i string
+    var p int
+    var m []string
+
+    if m = ip6a.FindStringSubmatch(s); m == nil {
+        m = ip6b.FindStringSubmatch(s)
+    }
+
+    if m == nil {
+        return host{}, fmt.Errorf("Invalid IPv6 net: %s", s)
+    }
+
+    i = m[1]
+    switch len(m) {
+    case 2:
+        p = DNS_PORT
+    case 3:
+        if m[2] == "" {
+            p = DNS_PORT
+        } else {
+            // convert
+            // don't need to catch err
+            p, _ = strconv.Atoi(m[2])
+        }
+    }
+
+    return NewHost(i, p, IPv6)
+}
+
+func NewHost(ip string, port int, proto string) (host, error) {
+    if port < PORT_MIN || port > PORT_MAX {
+        return host{}, fmt.Errorf("Port out of range: %d", port)
+    }
+
+    // leave full ip validation to the listener
+
+    switch proto {
+    case IPv4:
+        if ok := rIp4.MatchString(ip); !ok {
+            return host{}, fmt.Errorf("Invalid %s: %s", proto, ip)
+        }
+    case IPv6:
+        if ok := rIp6.MatchString(ip); !ok {
+            return host{}, fmt.Errorf("Invalid %s: %s", proto, ip)
+        }
+    default:
+        return host{}, fmt.Errorf("Invalid proto: %s", proto)
+    }
+
+    return host{ip, port, proto}, nil
 }
 
 func (h host) netConnString() string {
-    return fmt.Sprintf("%s:%d", h.name, h.port)
+    var s string
+
+    switch h.proto {
+    case IPv4: s = fmt.Sprintf("%s:%d", h.name, h.port)
+    case IPv6: s = fmt.Sprintf("[%s]:%d", h.name, h.port)
+    }
+
+    return s
 }
 
 
 // Server config
 
-func defaultConfig() (host, bool, []host, int, int, string, string, string, string, string, bool) {
-    lh, _ := newHosts(LOCAL_HOST)
-    rh, _ := newHosts(fmt.Sprintf("%s, %s", REMOTE_HOST1, REMOTE_HOST2))
-    return lh[0], PROXY, rh, WORKER_UDP, WORKER_TCP, RR_DIR, SERVER_RELOAD, DEFAULT_DOMAIN, SERVER_LOG, CACHE_LOG, DEBUG
+func defaultConfig() ([]host, []host, bool, []host, []host, int, int, string, string, string, string, string, bool) {
+    // local connection
+    h, _ := NewHost4(LOCAL_HOST4)
+    lh4 := []host{h}
+
+    h, _ = NewHost6(LOCAL_HOST6)
+    lh6 := []host{h}
+
+    // remote connection
+    h1, _ := NewHost4(REMOTE_HOST41)
+    h2, _ := NewHost4(REMOTE_HOST42)
+    rh4 := []host{h1, h2}
+
+    h1, _ = NewHost4(REMOTE_HOST61)
+    h2, _ = NewHost4(REMOTE_HOST62)
+    rh6 := []host{h1, h2}
+
+    return lh4, lh6, PROXY, rh4, rh6, WORKER_UDP, WORKER_TCP, RR_DIR, SERVER_RELOAD, DEFAULT_DOMAIN, SERVER_LOG, CACHE_LOG, DEBUG
 }
 
 type cfg struct {
     // config file
     config string
 
-    // local host:port ready
-    // to be used in net.Conn
-    listener host
+    // local listeners
+    listener4 []host
+    listener6 []host
 
-    // remote hosts:port ready
-    // to be used in net.Conn
-    dialer []host
+    // remote dialers
+    dialer4 []host
+    dialer6 []host
 
     // local workers (listeners)
     workerUDP int
@@ -100,9 +177,6 @@ type cfg struct {
     // default domain
     defaultDomain string
 
-    // resolv.conf search
-    //resolvconf []string
-
     // logs
     serverLog string
     cacheLog string
@@ -114,10 +188,10 @@ type cfg struct {
     proxy bool
 }
 
-func newCfg(config string) (*cfg, []string, error) {
+func newCfg(path string) (*cfg, []string, error) {
     // default config
-    lHost, proxy, rHost, wUdp, wTcp, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
-    c := &cfg{config, lHost, rHost, wUdp, wTcp, rrDir, cUpd, dDom, sLog, cLog, debug, proxy}
+    lh4, lh6, proxy, rh4, rh6, wUdp, wTcp, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
+    c := &cfg{path, lh4, lh6, rh4, rh6, wUdp, wTcp, rrDir, cUpd, dDom, sLog, cLog, debug, proxy}
 
     // disk config
     warn, err := c.fromDisk()
@@ -158,9 +232,9 @@ func readFile(path string) ([]string, error) {
     return lines, nil
 }
 
-func (c *cfg) fromDisk() ([]string, error) {
+func (c *cfg) fromDisk() (warning, error) {
     // defaults
-    lHost, proxy, rHost, wUdp, wTcp, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
+    lh4, lh6, proxy, rh4, rh6, wUdp, wTcp, rrDir, cUpd, dDom, sLog, cLog, debug := defaultConfig()
 
     lines, err := readFile(c.config)
     if err != nil {
@@ -178,17 +252,38 @@ func (c *cfg) fromDisk() ([]string, error) {
         }
 
         switch cs[0] {
-        case "listener":
-            h, err := newHosts(cs[1])
-            if err != nil {
-                return nil, err
+        case "listener.v4", "listener.v6", "proxy.dialer.v4", "proxy.dialer.v6":
+            // no want no spaces here
+            s := space.ReplaceAllString(cs[1], "")
+
+            // v4, v6 hosts
+            var hosts []host
+            for _, h := range strings.Split(s, ",") {
+                switch cs[0] {
+                case "listener.v4", "proxy.dialer.v4":
+                    v4, err := NewHost4(h)
+                    if err != nil {
+                        panic(err)
+                    }
+
+                    hosts = append(hosts, v4)
+                case "listener.v6", "proxy.dialer.v6":
+                    v6, err := NewHost6(h)
+                    if err != nil {
+                        panic(err)
+                    }
+
+                    hosts = append(hosts, v6)
+                }
             }
 
-            if len(h) != 1 {
-                return nil, errors.New("'listener' must be single definition")
+            // update config
+            switch cs[0] {
+                case "listener.v4":     lh4 = hosts
+                case "listener.v6":     lh6 = hosts
+                case "proxy.dialer.v4": rh4 = hosts
+                case "proxy.dialer.v6": rh6 = hosts
             }
-
-            lHost = h[0]
 
         case "proxy":
             if err := onOff(cs[1]); err != nil {
@@ -197,15 +292,6 @@ func (c *cfg) fromDisk() ([]string, error) {
             if cs[1] == "off" {
                 proxy = false 
             }
-
-        case "proxy.dialer":
-            pd = true
-            h, err := newHosts(cs[1])
-            if err != nil {
-                return nil, err
-            }
-
-            rHost = h
 
         case "worker.udp":
             i, err := strconv.Atoi(cs[1])
@@ -310,8 +396,10 @@ func (c *cfg) fromDisk() ([]string, error) {
     }
 
     // update config
-    c.listener = lHost
-    c.dialer = rHost
+    c.listener4 = lh4
+    c.listener6 = lh6
+    c.dialer4 = rh4
+    c.dialer6 = rh6
     c.workerUDP = wUdp
     c.workerTCP = wTcp
     c.rrDir = rrDir
@@ -340,6 +428,38 @@ func onOff(s string) error {
     return err
 }
 
+// local host strings
+// used for binding to local addresses
+func (c *cfg) localNetConnString4() []string {
+    return c.localNetConnString(IPv4)
+}
+
+func (c *cfg) localNetConnString6() []string {
+    return c.localNetConnString(IPv6)
+}
+
+func (c *cfg) localNetConnString(net string) []string {
+    var s []string
+
+    switch net {
+    case IPv4:
+        for _, h := range c.listener4 {
+            s = append(s, h.netConnString())
+        }
+    case IPv6:
+        for _, h := range c.listener6 {
+            s = append(s, h.netConnString())
+        }
+    default:
+        // this should not happen
+        panic("Baad net: " + net)
+    }
+
+    return s
+}
+
+
+/*
 // local host strings are the same
 func (c *cfg) localNetConnString() string {
     return c.listener.netConnString()
@@ -348,8 +468,67 @@ func (c *cfg) localNetConnString() string {
 func (c *cfg) localHostString() string {
     return c.localNetConnString()
 }
+*/
 
-// remote host strings are different
+// remote host strings
+// provides random one host from the pool
+// used for connection to upstream (dialer)
+func (c *cfg) remoteNetConnString4() []string {
+    return c.remoteNetConnString(IPv4)
+}
+
+func (c *cfg) remoteNetConnString6() []string {
+    return c.remoteNetConnString(IPv6)
+}
+
+func (c *cfg) remoteNetConnString(net string) []string {
+    var s []string
+
+    switch net {
+    case IPv4:
+        for _, h := range c.dialer4 {
+            s = append(s, h.netConnString())
+        }
+    case IPv6:
+        for _, h := range c.dialer6 {
+            s = append(s, h.netConnString())
+        }
+    default:
+        // this should not happen
+        panic("Baad net: " + net)
+    }
+
+    return s
+}
+
+// single net addr
+// used for dialer connection
+func (c *cfg) remoteNetConnDialer4() string {
+    return c.remoteNetConnDialer(IPv4)
+}
+
+func (c *cfg) remoteNetConnDialer6() string {
+    return c.remoteNetConnDialer(IPv6)
+}
+
+func (c *cfg) remoteNetConnDialer(net string) string {
+    rand.Seed(time.Now().UnixMicro())
+    var s string
+
+    switch net {
+    case IPv4: s = c.dialer4[rand.Intn(len(c.dialer4))].netConnString()
+    case IPv6: s = c.dialer6[rand.Intn(len(c.dialer6))].netConnString()
+    default:
+        // this should not happen
+        panic("Baad net: " + net)
+    }
+
+    return s
+}
+
+
+
+/*
 func (c *cfg) remoteNetConnString() string {
     // select one upstream
     // for network connection
@@ -362,13 +541,98 @@ func (c *cfg) remoteNetConnString() string {
     rand.Seed(time.Now().UnixMicro())
     return c.dialer[rand.Intn(l)].netConnString()
 }
+*/
 
+/*
+// provides all upstream details
+// used for logging
+func (c *cfg) remoteHostString4() string {
+    return c.remoteHostString(IPv4)
+}
+
+func (c *cfg) remoteHostString6() string {
+    return c.remoteHostString(IPv6)
+}
+
+func (c *cfg) remoteHostString(net string) string {
+    var s []string
+
+    switch net {
+    case IPv4:
+        for _, h := range c.dialer4 {
+            s = append(s, h.netConnString()) 
+        }
+    case IPv6:
+        for _, h := range c.dialer6 {
+            s = append(s, h.netConnString()) 
+        }
+    default:
+        // this should not happen
+        panic("Baad net: " + net)
+    }
+
+    return strings.Join(s, ", ")
+}
+*/
+
+
+/*
 func (c *cfg) remoteHostString() string {
-    // provide all upstream details
     var s []string
     for _, h := range c.dialer {
         s = append(s, h.netConnString()) 
     }
 
     return strings.Join(s, ", ")
+}
+*/
+
+func (c *cfg) isIpv4() bool {
+    return c.isNet(IPv4)
+}
+
+func (c *cfg) isIpv6() bool {
+    return c.isNet(IPv6)
+}
+
+func (c *cfg) isNet(net string) bool {
+    var b bool
+
+    switch net {
+    case IPv4: b = len(c.listener4) > 0
+    case IPv6: b = len(c.listener6) > 0
+    default:
+        panic("Baad net: " + net)
+    }
+
+    return b
+}
+
+func (c *cfg) validNet4() bool {
+    return c.validNet(IPv4)
+}
+
+func (c *cfg) validNet6() bool {
+    return c.validNet(IPv6)
+}
+
+func (c *cfg) validNet(net string) bool {
+    var b1, b2 bool
+
+    switch net {
+    case IPv4:
+        b1 = isIpv4()
+        b2 = c.isIpv4()
+    case IPv6:
+        b1 = isIpv6()
+        b2 = c.isIpv6()
+    default:
+        panic("Baad net: " + net)
+    }
+
+    if b1 && b2 {
+        return true
+    }
+
+    return false
 }
