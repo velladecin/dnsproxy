@@ -61,7 +61,11 @@ func NewWorkerUDP() *WorkerUDP {
 }
 
 func (w *WorkerUDP) Type() string {
-    return "UDP"
+    if w.net == IPv4 {
+        return "UDPv4"
+    }
+
+    return "UDPv6"
 }
 
 func (w *WorkerUDP) ListenAddr() net.Addr {
@@ -166,7 +170,11 @@ func NewWorkerTCP() *WorkerTCP {
 }
 
 func (w *WorkerTCP) Type() string {
-    return "TCP"
+    if w.net == IPv4 {
+        return "TCPv4"
+    }
+
+    return "TCPv6"
 }
 
 func (w *WorkerTCP) ListenAddr() net.Addr {

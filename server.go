@@ -37,7 +37,6 @@ type Server struct {
     netcfg net.ListenConfig
 }
 
-
 func NewServer(config string, stdout bool) Server {
     conf, warn, err := newCfg(config)
     if err != nil {
@@ -94,24 +93,7 @@ func NewServer(config string, stdout bool) Server {
         }
     }
 
-    /*
     sInfo.Printf("== Server Configuration ==")
-    sInfo.Printf("Listener: %s", conf.localHostString())
-    sInfo.Printf("Proxy: %v", conf.proxy)
-    sInfo.Printf("Proxy dialer: %s", conf.remoteHostString())
-    sInfo.Printf("UDP Workers: %d", conf.workerUDP)
-    sInfo.Printf("TCP Workers: %d", conf.workerTCP)
-    //sInfo.Printf("Resource records (rr) dir: %s", conf.rrDir)
-    sInfo.Printf("Resource records (rr) files: %s", strings.Join(rf, ", "))
-    sInfo.Printf("Cache update: %s", conf.cacheUpdate)
-    sInfo.Printf("Default domain: %s", conf.defaultDomain)
-    sInfo.Printf("Server log: %s", conf.serverLog)
-    sInfo.Printf("Cache log: %s", conf.cacheLog)
-    sInfo.Printf("Debug: %v", conf.debug)
-    */
-
-    sInfo.Printf("== Server Configuration ==")
-    sInfo.Printf("Proxy: %v", conf.proxy)
 
     // listeners, dialers setup based on
     // availability of IPv4/6 and config of the same
@@ -123,6 +105,8 @@ func NewServer(config string, stdout bool) Server {
         sInfo.Printf("Listener v6: %s", strings.Join(conf.localNetConnString6(), ", "))
     }
 
+    sInfo.Printf("Proxy: %v", conf.proxy)
+
     if conf.proxy {
         if conf.validNet4() {
             sInfo.Printf("Proxy dialer v4: %s", strings.Join(conf.remoteNetConnString4(), ", "))
@@ -133,7 +117,6 @@ func NewServer(config string, stdout bool) Server {
     }
     sInfo.Printf("UDP Workers: %d", conf.workerUDP)
     sInfo.Printf("TCP Workers: %d", conf.workerTCP)
-    //sInfo.Printf("Resource records (rr) dir: %s", conf.rrDir)
     sInfo.Printf("Resource records (rr) files: %s", strings.Join(rf, ", "))
     sInfo.Printf("Cache update: %s", conf.cacheUpdate)
     sInfo.Printf("Default domain: %s", conf.defaultDomain)
@@ -144,9 +127,7 @@ func NewServer(config string, stdout bool) Server {
     //
     // build up server
 
-    // TODO work out if v6 available
     srv := Server{
-        //worker: make([]Worker, (conf.workerUDP+conf.workerTCP)*2), // *2 = v4 + v6
         worker: make([]Worker, 0),
         cfg:    conf,
         netcfg: net.ListenConfig{
@@ -191,15 +172,6 @@ func NewServer(config string, stdout bool) Server {
             }
         }(d6)
     }
-
-    /*
-    dialer := make(chan string, PACKET_PREP_Q_SIZE)
-    go func(d chan string) {
-        for {
-            d <- srv.cfg.remoteNetConnString()
-        }
-    }(dialer)
-    */
 
     // packeter
     packeter := make(chan []byte, PACKET_PREP_Q_SIZE)
@@ -268,27 +240,6 @@ func NewServer(config string, stdout bool) Server {
             }
         }
     }
-
-
-    /*
-    for i:=0; i<len(srv.worker); i++ {
-        var w Worker
-        var err error
-
-        if i < conf.workerUDP {
-            w = NewWorkerUDP()
-        } else {
-            w = NewWorkerTCP()
-        }
-
-        err = w.Start(srv.netcfg, srv.cfg.localNetConnString(), srv.cfg.proxy, cache, packeter, dialer, i+1)
-        if err != nil {
-            panic(err)
-        }
-
-        srv.worker[i] = w
-    }
-    */
 
     // signals
 

@@ -25,7 +25,6 @@ type Cache struct {
 }
 
 var rDot = regexp.MustCompile(`\.`)
-//var rIp4 = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
 var rHost = regexp.MustCompile(`^[a-zA-Z0-9\-\.]+$`)
 
 func NewCache(domain string, rrFiles []string) *Cache {

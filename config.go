@@ -17,7 +17,6 @@ var comment = regexp.MustCompile(`^\s*#`)
 var space   = regexp.MustCompile(`\s+`)
 var empty   = regexp.MustCompile(`^\s*$`)
 var comma   = regexp.MustCompile(`,`)
-//var ip4     = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
 var rrx     = regexp.MustCompile(`\.rr$`)
 
 type warning []string
@@ -145,8 +144,8 @@ func defaultConfig() ([]host, []host, bool, []host, []host, int, int, string, st
     h2, _ := NewHost4(REMOTE_HOST42)
     rh4 := []host{h1, h2}
 
-    h1, _ = NewHost4(REMOTE_HOST61)
-    h2, _ = NewHost4(REMOTE_HOST62)
+    h1, _ = NewHost6(REMOTE_HOST61)
+    h2, _ = NewHost6(REMOTE_HOST62)
     rh6 := []host{h1, h2}
 
     return lh4, lh6, PROXY, rh4, rh6, WORKER_UDP, WORKER_TCP, RR_DIR, SERVER_RELOAD, DEFAULT_DOMAIN, SERVER_LOG, CACHE_LOG, DEBUG
@@ -458,18 +457,6 @@ func (c *cfg) localNetConnString(net string) []string {
     return s
 }
 
-
-/*
-// local host strings are the same
-func (c *cfg) localNetConnString() string {
-    return c.listener.netConnString()
-}
-
-func (c *cfg) localHostString() string {
-    return c.localNetConnString()
-}
-*/
-
 // remote host strings
 // provides random one host from the pool
 // used for connection to upstream (dialer)
@@ -526,67 +513,6 @@ func (c *cfg) remoteNetConnDialer(net string) string {
     return s
 }
 
-
-
-/*
-func (c *cfg) remoteNetConnString() string {
-    // select one upstream
-    // for network connection
-    l := len(c.dialer)
-
-    if l == 1 {
-        return c.dialer[0].netConnString()
-    }
-
-    rand.Seed(time.Now().UnixMicro())
-    return c.dialer[rand.Intn(l)].netConnString()
-}
-*/
-
-/*
-// provides all upstream details
-// used for logging
-func (c *cfg) remoteHostString4() string {
-    return c.remoteHostString(IPv4)
-}
-
-func (c *cfg) remoteHostString6() string {
-    return c.remoteHostString(IPv6)
-}
-
-func (c *cfg) remoteHostString(net string) string {
-    var s []string
-
-    switch net {
-    case IPv4:
-        for _, h := range c.dialer4 {
-            s = append(s, h.netConnString()) 
-        }
-    case IPv6:
-        for _, h := range c.dialer6 {
-            s = append(s, h.netConnString()) 
-        }
-    default:
-        // this should not happen
-        panic("Baad net: " + net)
-    }
-
-    return strings.Join(s, ", ")
-}
-*/
-
-
-/*
-func (c *cfg) remoteHostString() string {
-    var s []string
-    for _, h := range c.dialer {
-        s = append(s, h.netConnString()) 
-    }
-
-    return strings.Join(s, ", ")
-}
-*/
-
 func (c *cfg) isIpv4() bool {
     return c.isNet(IPv4)
 }
@@ -618,6 +544,9 @@ func (c *cfg) validNet6() bool {
 
 func (c *cfg) validNet(net string) bool {
     var b1, b2 bool
+
+    // isIpv4,6() checks availability of net on server
+    // c.isIpv4,6() checks if net desired/configured in disk config
 
     switch net {
     case IPv4:

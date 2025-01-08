@@ -5,10 +5,10 @@ const (
     LOCAL_HOST4     = "127.0.0.1:53"
     LOCAL_HOST6     = "[::1]:53"
     PROXY           = true
-    REMOTE_HOST41   = "8.8.8.8:53"  // google.
-    REMOTE_HOST42   = "8.8.4.4:53"  // dns (v4)
-    REMOTE_HOST61   = "[2001:4860:4860::8844]:53"   // google.
-    REMOTE_HOST62   = "[2001:4860:4860::8888]:53"   // dns (v6)
+    REMOTE_HOST41   = "8.8.8.8:53" // dns.
+    REMOTE_HOST42   = "8.8.4.4:53" // google (v4)
+    REMOTE_HOST61   = "[2001:4860:4860::8844]:53" // dns.
+    REMOTE_HOST62   = "[2001:4860:4860::8888]:53" // google (v6)
     WORKER_UDP      = 3
     WORKER_TCP      = 1
     RR_DIR          = "/etc/dpx/rr.d"
