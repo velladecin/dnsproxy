@@ -73,9 +73,13 @@ func (c *Cache) load(init bool) {
     rTTL  := regexp.MustCompile(`^ttl\:\d+$`)
 
     //answers := make(map[int]map[string]*Answer)
+
+    // this is local cache
+    // populate answers to populate cache
     answers := map[int]map[string]*Answer{
         A: {},
-        CNAME: {}, 
+        AAAA: {},
+        CNAME: {},
         SOA: {},
         PTR: {},
         MX: {},
@@ -104,9 +108,10 @@ func (c *Cache) load(init bool) {
         defer fh.Close()
 
         // composites records
-        // CNAME, A, MX
+        // CNAME, A, AAAA, MX
         cn := make(map[string]string)
         an := make(map[string][]string)
+        aaaan := make(map[string][]string)
         mn := make(map[string]string)
 
         fail := false
@@ -134,6 +139,7 @@ func (c *Cache) load(init bool) {
                 break
             }
 
+            // TODO: no default domain, is yaml the answer?
             // add default domain if needed
             if ok := rDot.MatchString(sl[0]); !ok {
                 sl[0] += "."
@@ -153,8 +159,6 @@ func (c *Cache) load(init bool) {
                 break
             }
 
-            a := true
-            //auth := false
             ptr := false 
             cname := false
             mx := false
@@ -170,16 +174,13 @@ func (c *Cache) load(init bool) {
                 continue
             }
 
+            // flags/options
             for _, f := range sl[2:] {
                 switch f {
                 //case "auth":    auth = true
                 case "ptr":     ptr = true
-                case "cname":
-                                a = false
-                                cname = true
-                case "mx":
-                                a = false
-                                mx = true
+                case "cname":   cname = true
+                case "mx":      mx = true
                 default:
                     // TODO
                     // flags with values
@@ -206,6 +207,47 @@ func (c *Cache) load(init bool) {
                 break
             }
 
+            // A
+            if rIp4.MatchString(sl[1]) {
+                //a = true
+                if cname {
+                    cCrit.Print("Invalid definition: A+CNAME: " + line)
+                    fail = true
+                    break
+                }
+
+                // use these later for
+                // for CNAME definition
+                an[sl[0]] = append(an[sl[0]], sl[1])
+
+                if ptr {
+                    iaa := InAddrArpa(sl[1])
+                    answers[PTR][iaa] = NewPtr(iaa, sl[0])
+                    //could also be mx
+                    //continue
+                }
+            }
+
+            // AAAA
+            if rIp6.MatchString(sl[1]) {
+                //aaaa = true
+                if cname {
+                    cCrit.Print("Invalid definition: AAAA+CNAME: " + line)
+                }
+
+                // use these later for
+                // for CNAME definition
+                aaaan[sl[0]] = append(aaaan[sl[0]], sl[1])
+
+                if ptr {
+                    iaa := InAddrArpa6(sl[1])
+                    answers[PTR][iaa] = NewPtr(iaa, sl[0])
+                    //could also be mx
+                    //continue
+                }
+            }
+
+            /*
             // we don't support standalone PTR
             // therefore if PTR then also A
             if a {
@@ -231,6 +273,7 @@ func (c *Cache) load(init bool) {
                 cn[sl[0]] = sl[1]
                 continue
             }
+            */
 
             if mx {
                 if ptr {
@@ -290,6 +333,20 @@ func (c *Cache) load(init bool) {
             }
 
             answers[A][a.QuestionString()] = a
+        }
+
+        for h, ips := range aaaan {
+            aaaa, err := NewAAAA(h, ips)
+            if err != nil {
+                if init {
+                    panic(err)
+                }
+
+                cCrit.Print("Could not process AAAA record: " + h + ", " + err.Error())
+                return
+            }
+
+            answers[AAAA][aaaa.QuestionString()] = aaaa
         }
 
         // process CNAMEs
@@ -395,18 +452,13 @@ func (c *Cache) Get(t int, s string) *Answer {
     return nil
 }
 
-func InAddrArpa(ip string) string {
-    o := strings.Split(ip, ".")
-    return fmt.Sprintf("%s.%s.%s.%s.in-addr.arpa", o[3], o[2], o[1], o[0])
-}
-
 func cnameChain(s string, cn map[string]string, answers map[int]map[string]*Answer) ([]string, error) {
     r := make([]string, 0)
 
     if _, ok := cn[s]; ok {
         r = append(r, cn[s])
 
-        next, err := cnameChain(cn[s], cn, answers) 
+        next, err := cnameChain(cn[s], cn, answers)
         if err != nil {
             return nil, err
         }
@@ -420,4 +472,26 @@ func cnameChain(s string, cn map[string]string, answers map[int]map[string]*Answ
     }
 
     return r, nil
+}
+
+func InAddrArpa(ip string) string {
+    o := strings.Split(ip, ".")
+    return fmt.Sprintf("%s.%s.%s.%s.in-addr.arpa", o[3], o[2], o[1], o[0])
+}
+
+func InAddrArpa6(ip string) string {
+    // ; <<>> DiG 9.11.4-P2-RedHat-9.11.4-26.P2.el7_9.17 <<>> -x 2001:4998:44:3507::8000
+    // ;0.0.0.8.0.0.0.0.0.0.0.0.0.0.0.0.7.0.5.3.4.4.0.0.8.9.9.4.1.0.0.2.ip6.arpa. IN PTR
+    ips := strings.Split(ipv6Maximize(ip), "")
+
+    ipr := make([]string, len(ips))
+    for i, j := 0, len(ips)-1; i<len(ips); i++ {
+        if i > j {
+            break;
+        }
+
+        ipr[i], ipr[j] = ips[j], ips[i]
+    }
+
+    return strings.Join(ipr, ".")
 }

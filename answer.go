@@ -1,6 +1,7 @@
 package main
 
 import (
+    "fmt"
     "strings"
     "regexp"
     "bytes"
@@ -171,7 +172,7 @@ func NewCname(q string, r []string, cache map[int]map[string]*Answer) (*Answer, 
         // CNAME
         // needs 2 bytes for total length
         tl := a.i
-        a.i += 2
+        a.i += LEN_LEN
 
         l, _ := a.labelize(r[1])
 
@@ -219,6 +220,7 @@ func NewPtr(q, soa string) *Answer {
 
     x, p := a.labelize(a.ResponseString())
     if !p {
+        // not a pointer
         // needs root(0)
         a.i++
         x++
@@ -231,6 +233,55 @@ func NewPtr(q, soa string) *Answer {
     a.additional()
 
     return a
+}
+
+func NewAAAA(h string, ip []string) (*Answer, error) {
+    rr := make([][]string, len(ip))
+    for i, p := range ip {
+        rr[i] = []string{h, p}
+    }
+
+    a := &Answer{rr,
+                 make([][]string, 0),
+                 make([]byte, HEADER_LEN),
+                 make([]byte, PACKET_SIZE-HEADER_LEN),
+                 make(map[string]int),
+                 0,
+                 AAAA}
+
+    if debug {
+        cDebg.Print("New AAAA: " + a.QandR())
+    }
+
+    // headers
+    a.RespHeaders()
+
+    // question
+    a.Question()
+
+
+    for _, r := range a.rr {
+        // response
+        a.labelize(r[0])
+
+        a.body[a.i+1] = AAAA
+        a.body[a.i+3] = IN
+        a.body[a.i+7] = TTL
+        a.i += 8
+
+        _, err := a.labelizeIp(r[1])
+        if err != nil {
+            return nil, err
+        }
+
+        // don't need to increment a.i here
+        // as a.lablizeIp() does it for me
+    }
+
+    // additional
+    a.additional()
+
+    return a, nil
 }
 
 func NewA(h string, ip []string) (*Answer, error) {
@@ -381,7 +432,7 @@ func NewNxdomain(q string) *Answer {
     // first byte is 0 (ignore), second is the actual total length
     // and for that reason -1 on a.i
     a.body[a.i-1-x] = byte(x)
-    
+
     // additional section
     a.additional()
 
@@ -472,7 +523,7 @@ func (a *Answer) additional() {
 
     // 2 bytes
     for i, b := range intToBytes(PACKET_SIZE, INT16) {
-        a.body[a.i+i] = b 
+        a.body[a.i+i] = b
     }
     a.i += 2
 
@@ -507,24 +558,42 @@ func (a *Answer) serializePacket(p []byte) int {
 
 // strictly speaking IPs do not have labels. But for the sake of
 // consistency inputting IP into the packet is called labelize too
+// this works for both ip4, ipv6
 func (a *Answer) labelizeIp(ip string) (int, error) {
-    // 6 bytes of length(2), ip addr octets(4)
+    var ips []string
 
-    // skip first byte
-    a.body[a.i+1] = byte(4)
-    a.i += 2
+    switch ; {
+    case rIp4.MatchString(ip):
+        ips = strings.Split(ip, ".")
+    case rIp6.MatchString(ip):
+        // split by 2 digits (1 byte)
+        x := ipv6Maximize(ip)
+        for i:=2; i<=len(x); i+=2 {
+            ips = append(ips, x[i-2:i])
+        }
+    default:
+        return 0, fmt.Errorf("Invalid IP: %s", ip)
+    }
 
-    for m, o := range strings.Split(ip, ".") {
+    // 2 bytes of length
+    a.i += LEN_LEN
+    // input length 4(A) or 16(AAAA) into 2nd byte
+    a.body[a.i-1] = byte(len(ips))
+
+    for m, o := range ips {
         v, err := strconv.Atoi(o)
         if err != nil {
-            return 2, err
+            // LEN_LEN as we (at least) input length into the packet
+            return LEN_LEN, err
         }
 
+        // populate body with values
         a.body[a.i+m] = byte(v)
     }
-    a.i += 4
+    a.i += len(ips)
 
-    return 6, nil
+    // length + value
+    return LEN_LEN+len(ips), nil
 }
 
 // This creates label structure for given string, inputs that into a.body and
@@ -580,7 +649,7 @@ func (a *Answer) labelize(s string) (int, bool) {
         }
     }
 
-    return a.i - ai, pointer
+    return a.i-ai, pointer
 }
 
 func (a *Answer) QuestionString() string {
@@ -603,10 +672,10 @@ func (a *Answer) ResponseString() string {
                 continue
             }
 
-            s += ", " + ss[1] 
+            s += ", " + ss[1]
         }
 
-    case A:
+    case A, AAAA:
         // collect IPs
         for _, ss := range a.rr {
             if len(s) == 0 {
@@ -664,7 +733,7 @@ func intToBytes(i, t int) []byte {
     case INT16: err = binary.Write(buf, binary.BigEndian, int16(i))
     case INT32: err = binary.Write(buf, binary.BigEndian, int32(i))
     }
-    
+
     if err != nil {
         // this should not happen
         // as 'i' is correctly pre-defined (see const.go)

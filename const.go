@@ -71,6 +71,9 @@ const (
     // but I've not seen it other than 192
     LABEL_POINTER = 192
 
+    // length of (label) length which is 2 bytes
+    LEN_LEN = 2
+
     // type
     A       = 1
     CNAME   = 5
@@ -78,6 +81,7 @@ const (
     PTR     = 12
     MX      = 15
     TXT     = 16
+    AAAA    = 28
 
     // RCODE
     FMTERROR = 1

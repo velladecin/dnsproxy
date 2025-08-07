@@ -79,6 +79,7 @@ func RequestTypeString(i int) string {
     case SOA:   s = "SOA"
     case PTR:   s = "PTR"
     case MX:    s = "MX"
+    case AAAA:  s = "AAAA"
     default:    s = fmt.Sprintf("not-yet-implemented(%d)", i)
     }
 
@@ -106,7 +107,7 @@ func Response(b []byte) string {
     }
 
     switch t {
-    case A, PTR:
+    case A, AAAA, PTR:
     default:
         return "TODO: " + RequestTypeString(t)
     }
@@ -146,6 +147,17 @@ func Response(b []byte) string {
             i += 3
 
             resp = append(resp, ip)
+            continue
+        }
+
+        if t == AAAA {
+            // length(2) + next pos index(1)
+            i += 3
+            
+            // length is 16  
+            resp = append(resp, ipv6BtoS(b[i:i+16], false))
+            i += 16
+
             continue
         }
 

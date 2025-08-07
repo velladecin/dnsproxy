@@ -14,6 +14,63 @@ import (
 var rIp6 = regexp.MustCompile(`^[a-f0-9\:]{3,39}$`)
 var rIp6full = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
+func ipv6MaximizeNibble(ip string) string {
+    r := make([]string, 8)
+
+    s := ipv6Maximize(ip)
+    for i:=0; i<len(s); i+=4 {
+        j := i/4
+        r[j] = s[i:i+4]
+    }
+
+    return strings.Join(r, ":")
+}
+
+func ipv6Maximize(ip string) string {
+    nibble := strings.Split(ip, ":")
+
+    if nibble[0] == "" {
+        // ::1
+        // this gives extra empty element at the front of the slice
+        // which does not happen with first nibble populated
+        nibble = nibble[1:]
+    }
+
+    if nibble[len(nibble)-1] == "" {
+        // 1::
+        // this gives extra empty element at the end of the slice
+        // which does not happen with last nibble populated
+        nibble = nibble[:len(nibble)-1]
+    }
+
+    for i, n := range nibble {
+        // a::b
+        if n == "" {
+            // (7-i)-len(nibble[i+1:]) is the top index starting from zero (0..index)
+            // 0-2 is length 3, hence +1 at the end
+            missing_nibbles := make([]string, (7-i)-len(nibble[i+1:])+1)
+            for j:=0; j<len(missing_nibbles); j++ {
+                missing_nibbles[j] = "0"
+            }
+
+            // populate ::
+            nibble = append(nibble[:i], append(missing_nibbles, nibble[i+1:]...)...)
+            break
+        }
+    }
+
+    var ip6s string
+    for _, v := range nibble {
+        if len(v) != 4 {
+            v = fmt.Sprintf("%04s", v)
+        }
+
+        ip6s += v
+    }
+
+    return ip6s
+}
+
 func ipv6StoB(ip string) ([]byte, error) {
     ip = strings.ToLower(ip)
 
@@ -25,6 +82,7 @@ func ipv6StoB(ip string) ([]byte, error) {
         return nil, fmt.Errorf("Invalid IPv6 addr: %s", ip)
     }
 
+    /*
     nibble := strings.Split(ip, ":")
 
     if nibble[0] == "" {
@@ -67,6 +125,9 @@ func ipv6StoB(ip string) ([]byte, error) {
     }
 
     return hex.DecodeString(ip6s)
+    */
+
+    return hex.DecodeString(ipv6Maximize(ip))
 }
 
 func ipv6BtoS(ip []byte, full bool) string {
@@ -109,7 +170,7 @@ func ipv6BtoS(ip []byte, full bool) string {
             default:
                 s = append(s, fmt.Sprintf("%x%02x", ip[i-1], ip[i]))
             }
-        }        
+        }
     }
 
     // single nibble populated
