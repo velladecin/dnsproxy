@@ -34,7 +34,7 @@ func Question(q []byte) string {
 
     l := int(qb[0])
     for i:=1; i<len(qb); {
-        s += string(qb[i:i+l])             
+        s += string(qb[i:i+l])
         i += l
 
         if i >= len(qb) {
@@ -108,6 +108,7 @@ func Response(b []byte) string {
 
     switch t {
     case A, AAAA, PTR:
+    //case MX, NS:
     default:
         return "TODO: " + RequestTypeString(t)
     }

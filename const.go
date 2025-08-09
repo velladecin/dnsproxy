@@ -152,8 +152,21 @@ const (
 // file perms
 // https://github.com/phayes/permbits/blob/master/permbits.go
 // https://stackoverflow.com/questions/28969455/how-to-properly-instantiate-os-filemode
-// TODO: fix the casing on the below
 const (
+    // owner bits
+    O_R uint32 = 1<<8
+    O_W uint32 = 1<<7
+    O_X uint32 = 1<<6
+    // group bits
+    G_R  uint32 = 1<<5
+    G_W  uint32 = 1<<4
+    G_X  uint32 = 1<<3
+    // other bits
+    T_R  uint32 = 1<<2
+    T_W  uint32 = 1<<1
+    T_X  uint32 = 1<<0
+
+    /*
     ownerR  uint32 = 1<<8
     ownerW  uint32 = 1<<7
     ownerX  uint32 = 1<<6
@@ -165,4 +178,5 @@ const (
     otherR  uint32 = 1<<2
     otherW  uint32 = 1<<1
     otherX  uint32 = 1<<0
+    */
 )

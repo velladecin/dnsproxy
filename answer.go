@@ -6,6 +6,7 @@ import (
     "regexp"
     "bytes"
     "encoding/binary"
+    "encoding/hex"
     "time"
     "strconv"
 )
@@ -19,7 +20,7 @@ type Answer struct {
     addi [][]string
 
     // packet header
-    header []byte 
+    header []byte
 
     // packet body
     body []byte
@@ -560,6 +561,52 @@ func (a *Answer) serializePacket(p []byte) int {
 // consistency inputting IP into the packet is called labelize too
 // this works for both ip4, ipv6
 func (a *Answer) labelizeIp(ip string) (int, error) {
+    var iplen int
+
+    // 2 bytes of length
+    a.i += LEN_LEN
+
+    switch ; {
+    case rIp4.MatchString(ip):
+        // length 4(A)
+        iplen = 4
+        a.body[a.i-1] = byte(iplen)
+
+        for i, o := range strings.Split(ip, ".") {
+            v, err := strconv.Atoi(o)
+            if err != nil {
+                // LEN_LEN as we (at least) input length into the packet
+                return LEN_LEN, err
+            }
+
+            // populate body with values
+            a.body[a.i+i] = byte(v)
+        }
+
+    case rIp6.MatchString(ip):
+        // length 16(AAAA)
+        iplen = 16
+        a.body[a.i-1] = byte(iplen)
+
+        bs, err := hex.DecodeString(ipv6Maximize(ip))
+        if err != nil {
+            return LEN_LEN, err
+        }
+
+        for i, b := range bs {
+            a.body[a.i+i] = b
+        }
+
+    default:
+        return 0, fmt.Errorf("Invalid IP: %s", ip)
+    }
+
+    // increment body index
+    a.i += iplen
+
+    return LEN_LEN+iplen, nil
+}
+func (a *Answer) labelizeIpX(ip string) (int, error) {
     var ips []string
 
     switch ; {

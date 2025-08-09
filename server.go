@@ -269,20 +269,20 @@ func NewServer(config string, stdout bool) Server {
                 sInfo.Print("Closing server logger handles")
                 sInfo.Print("Good Bye!")
                 sInfo.Close()
-                
+
                 os.Exit(0)
             }
 
             // reload cache
             // when configured so on SIGHUP
-            if srv.cfg.cacheUpdate == SERVER_RELOAD { 
+            if srv.cfg.cacheUpdate == SERVER_RELOAD {
                 sInfo.Printf("Reloading cache as per config")
                 cache.Reload()
             }
         }
     }(sigch, cache)
 
-    if srv.cfg.cacheUpdate == FILE_CHANGE { 
+    if srv.cfg.cacheUpdate == FILE_CHANGE {
         w := make([]*fstat, len(rf))
         for i, f := range rf {
             w[i] = newFstat(f)
@@ -290,14 +290,20 @@ func NewServer(config string, stdout bool) Server {
 
         // RR files watcher
         go func(wf []*fstat, c *Cache) {
+            noise := true
             for {
                 reload := false
                 for _, f := range wf {
                     s := newFstat(f.path)
                     if !s.exists() {
                         // file disappeared, do nothing and log
-                        // TODO: this is very noisy and logs every second
-                        sCrit.Printf("RR file disappeared: " + s.path)
+                        if noise {
+                            // this is very noisy (every second)
+                            sCrit.Printf("RR file disappeared: " + s.path)
+                            // stopping it from logging > 1
+                            noise = false
+                        }
+
                         reload = false
                         break
                     }

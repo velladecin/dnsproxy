@@ -57,7 +57,7 @@ func (fs *fstat) worldReadable() bool {
 
         ff := newFstat(s)
 
-        if (ff.mode & otherR) == 0 {
+        if (ff.mode & T_R) == 0 {
             return false
         }
     }
