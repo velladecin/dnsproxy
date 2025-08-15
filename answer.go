@@ -286,9 +286,6 @@ func NewAAAA(h string, ip []string) (*Answer, error) {
 }
 
 func NewA(h string, ip []string) (*Answer, error) {
-
-    // TODO: Make sure you don't have the same IPs for multi records
-
     rr := make([][]string, len(ip))
     for i, p := range ip {
         rr[i] = []string{h, p}
@@ -306,10 +303,7 @@ func NewA(h string, ip []string) (*Answer, error) {
         cDebg.Print("New A: " + a.QandR())
     }
 
-    // headers
     a.RespHeaders()
-
-    // question
     a.Question()
 
     for _, r := range a.rr {
@@ -327,9 +321,7 @@ func NewA(h string, ip []string) (*Answer, error) {
         }
     }
 
-    // additional
     a.additional()
-
     return a, nil
 }
 
@@ -722,7 +714,7 @@ func (a *Answer) ResponseString() string {
             s += ", " + ss[1]
         }
 
-    case A, AAAA:
+    case A:
         // collect IPs
         for _, ss := range a.rr {
             if len(s) == 0 {
@@ -732,7 +724,18 @@ func (a *Answer) ResponseString() string {
 
             s += ", " + ss[1]
         }
-    }
+
+	case AAAA:
+        // collect IPs
+        for _, ss := range a.rr {
+            if len(s) == 0 {
+                s = ipv6Minimize(ss[1])
+                continue
+            }
+
+            s += ", " + ipv6Minimize(ss[1])
+        }
+	}
 
     return s
 }

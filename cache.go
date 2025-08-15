@@ -40,6 +40,7 @@ func NewCache(domain string, rrFiles []string) *Cache {
 }
 
 func (c *Cache) Dump() {
+	// TODO log this nicer looking at you => %+v
     cInfo.Printf("=== CACHE DUMP ===\n")
     for t, rrs := range c.pool {
         cInfo.Printf("= TYPE: %s\n", RequestTypeString(t))
@@ -187,7 +188,7 @@ func (c *Cache) load(init bool) {
                     fmt.Println(f)
                     if ok := rTTL.MatchString(f); ok {
                         t := strings.Split(f, ":")
-                        fmt.Println(">>>>>>>>>>>>>>>>> " + t[1])
+                        fmt.Println(">>>*>>>>>>>>>>>>>> " + t[1])
                         continue
                     }
 
@@ -209,35 +210,67 @@ func (c *Cache) load(init bool) {
 
             // A
             if rIp4.MatchString(sl[1]) {
-                //a = true
                 if cname {
                     cCrit.Print("Invalid definition: A+CNAME: " + line)
                     fail = true
                     break
                 }
 
-                // use these later for
-                // for CNAME definition
-                an[sl[0]] = append(an[sl[0]], sl[1])
+				dup := false
+				// check for duplicated IPs
+				if ips, ok := an[sl[0]]; ok {
+					for _, ip := range ips {
+						if ip == sl[1] {
+							cWarn.Printf("IP duplication: %s A %s", sl[0], ip)
+							dup = true
+							break
+						}
+					}
+				}
 
-                if ptr {
-                    iaa := InAddrArpa(sl[1])
-                    answers[PTR][iaa] = NewPtr(iaa, sl[0])
-                    //could also be mx
-                    //continue
-                }
+				// ignore duplicates but don't die
+				if dup {
+					continue
+				}
+
+                // use these later for CNAME definition
+				an[sl[0]] = append(an[sl[0]], sl[1])
+
+				if ptr {
+					iaa := InAddrArpa(sl[1])
+					answers[PTR][iaa] = NewPtr(iaa, sl[0])
+					//could also be mx
+					//continue
+				}
             }
 
             // AAAA
             if rIp6.MatchString(sl[1]) {
-                //aaaa = true
                 if cname {
                     cCrit.Print("Invalid definition: AAAA+CNAME: " + line)
                 }
 
-                // use these later for
-                // for CNAME definition
-                aaaan[sl[0]] = append(aaaan[sl[0]], sl[1])
+				// check for duplicated IPs
+				// maximize first!
+				ip6max := ipv6Maximize(sl[1])
+
+				dup := false
+				if ips6, ok := aaaan[sl[0]]; ok {
+					for _, ip6 := range ips6 {
+						if ip6 == ip6max {
+							cWarn.Printf("IP duplication: %s AAAA %s", sl[0], ipv6Minimize(ip6))
+							dup = true
+							break
+						}
+					}
+				}
+
+				if dup {
+					continue
+				}
+
+                // use these later for CNAME definition
+                aaaan[sl[0]] = append(aaaan[sl[0]], ip6max)
 
                 if ptr {
                     iaa := InAddrArpa6(sl[1])
@@ -246,34 +279,6 @@ func (c *Cache) load(init bool) {
                     //continue
                 }
             }
-
-            /*
-            // we don't support standalone PTR
-            // therefore if PTR then also A
-            if a {
-                if ok := rIp4.MatchString(sl[1]); !ok {
-                    cCrit.Print("Invalid IP addr: " + line)
-                    fail = true
-                    break
-                }
-
-                // use these later for
-                // for CNAME definition
-                an[sl[0]] = append(an[sl[0]], sl[1])
-            }
-
-            if ptr {
-                // must be valid since 'if a {}' above passed
-                iaa := InAddrArpa(sl[1])
-                answers[PTR][iaa] = NewPtr(iaa, sl[0])
-                continue
-            }
-
-            if cname {
-                cn[sl[0]] = sl[1]
-                continue
-            }
-            */
 
             if mx {
                 if ptr {
@@ -320,7 +325,7 @@ func (c *Cache) load(init bool) {
         }
 
         // process A records
-        // order counts and A must be done before CNAME
+        // order matters, A must be done before CNAME
         for h, ips := range an {
             a, err := NewA(h, ips)
             if err != nil {

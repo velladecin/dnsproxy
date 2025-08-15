@@ -13,6 +13,7 @@ import (
 // 8x4 = 32 + 7 = 39
 var rIp6 = regexp.MustCompile(`^[a-f0-9\:]{3,39}$`)
 var rIp6full = regexp.MustCompile(`^[a-f0-9]{32}$`)
+var rRmLeadZero = regexp.MustCompile(`^0+(.*)`)
 
 func ipv6MaximizeNibble(ip string) string {
     r := make([]string, 8)
@@ -24,6 +25,72 @@ func ipv6MaximizeNibble(ip string) string {
     }
 
     return strings.Join(r, ":")
+}
+
+func ipv6Minimize(ip string) string {
+	// requires maximized ip
+	ip = ipv6Maximize(ip)
+
+	// zero compression (::)
+	shortZero := true
+
+	// shortened ipv6
+	sip := make([]string, 8)
+	j := 0
+
+	F_LOOP:
+	for i:=4; i<=len(ip); i+=4 {
+		nibble := ip[i-4:i]
+
+		// leading zero compression (0001)
+		if r := rRmLeadZero.FindStringSubmatch(nibble); r != nil {
+			if r[1] == "" {
+				r[1] = "0"
+			}
+
+			nibble = r[1]
+		}
+
+		if shortZero {
+			// 2+ zeros
+			if j > 1 {
+				switch nibble {
+				case "0":
+					// compression in progress
+					if sip[j-2] == "0" && sip[j-1] == "0" {
+						// end of IP string
+						// 1:0:0 = 1::
+						if i == len(ip) {
+							sip[j-2], sip[j-1] = "", ""
+							// label needed
+							// switch also accepts break
+							break F_LOOP
+						}
+
+						continue
+					}
+				default:
+					// end of compression
+					if sip[j-2] == "0" && sip[j-1] == "0" {
+						sip[j-2], sip[j-1] = "", ""
+
+						// 1:0:0:1 = 1:::1 (j = 3)
+						// 0:0:1   = ::1   (j = 2, zeros from the start)
+						if j > 2 {
+							j--
+						}
+
+						shortZero = false
+					}
+				}
+			}
+		}
+
+		sip[j] = nibble
+		j++
+	}
+
+	return strings.Join(sip[:j], ":")
 }
 
 func ipv6Maximize(ip string) string {
