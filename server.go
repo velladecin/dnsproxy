@@ -124,9 +124,7 @@ func NewServer(config string, stdout bool) Server {
     sInfo.Printf("Cache log: %s", conf.cacheLog)
     sInfo.Printf("Debug: %v", conf.debug)
 
-    //
-    // build up server
-
+	// listeners (local)
     srv := Server{
         worker: make([]Worker, 0),
         cfg:    conf,
@@ -154,24 +152,22 @@ func NewServer(config string, stdout bool) Server {
         cache.Dump()
     }
 
-    // dialers
-    // do these regardless of proxy
-    // as they simply won't be used
+    // dialers (remote)
+	// these channels need to be started even if proxy is off
+	// as each request attempts to read from them, see ServeDNS()
     d4 := make(chan string, DIALER_PREP_Q_SIZE)
     d6 := make(chan string, DIALER_PREP_Q_SIZE)
-    if conf.proxy {
-        go func(d chan string) {
-            for {
-                d <- srv.cfg.remoteNetConnDialer4()
-            }
-        }(d4)
+	go func(d chan string) {
+		for {
+			d <- srv.cfg.remoteNetConnDialer4()
+		}
+	}(d4)
 
-        go func(d chan string) {
-            for {
-                d <- srv.cfg.remoteNetConnDialer6()
-            }
-        }(d6)
-    }
+	go func(d chan string) {
+		for {
+			d <- srv.cfg.remoteNetConnDialer6()
+		}
+	}(d6)
 
     // packeter
     packeter := make(chan []byte, PACKET_PREP_Q_SIZE)
